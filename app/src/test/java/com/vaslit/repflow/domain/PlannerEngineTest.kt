@@ -2,6 +2,7 @@ package com.vaslit.repflow.domain
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
+import java.time.DayOfWeek
 import java.time.LocalDate
 
 class PlannerEngineTest {
@@ -10,7 +11,7 @@ class PlannerEngineTest {
     private val engine = DefaultPlannerEngine(startDateProvider = { fixedDate })
 
     @Test
-    fun `build initial plan creates six weeks with checkpoint tests`() {
+    fun `build initial plan creates two week phase with control test outside preferred days`() {
         val plan = engine.buildInitialPlan(
             AssessmentResult(
                 exerciseType = ExerciseType.PULL_UP,
@@ -18,18 +19,16 @@ class PlannerEngineTest {
                 difficulty = DifficultyLevel.BASE,
                 metrics = emptyList(),
             ),
+            preferredDays = listOf(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY, DayOfWeek.FRIDAY),
+            phaseIndex = 1,
+            maintenanceMode = false,
         )
 
-        assertThat(plan.weeks).hasSize(6)
-        assertThat(plan.weeks.flatMap { it.sessions }).hasSize(18)
-        assertThat(plan.checkpoints).containsExactly(
-            fixedDate.plusDays(12),
-            fixedDate.plusDays(26),
-            fixedDate.plusDays(40),
-        )
-        assertThat(plan.weeks[1].sessions.last().isTest).isTrue()
-        assertThat(plan.weeks[3].sessions.last().isTest).isTrue()
-        assertThat(plan.weeks[5].sessions.last().isTest).isTrue()
+        assertThat(plan.weeks).hasSize(2)
+        assertThat(plan.weeks.flatMap { it.sessions }).hasSize(7)
+        assertThat(plan.checkpoints).containsExactly(fixedDate.plusDays(13))
+        assertThat(plan.weeks.flatMap { it.sessions }.count { it.isTest }).isEqualTo(1)
+        assertThat(plan.weeks.flatMap { it.sessions }.last().scheduledDate.dayOfWeek).isEqualTo(DayOfWeek.SATURDAY)
     }
 
     @Test
@@ -38,8 +37,8 @@ class PlannerEngineTest {
             level = ProgressionLevel.CLASSIC,
             difficulty = DifficultyLevel.BASE,
             prescriptions = listOf(
-                SetPrescription(0, targetReps = 10, restSeconds = 60, note = ""),
-                SetPrescription(1, targetReps = 10, restSeconds = 60, note = ""),
+                SetPrescription(0, variant = ExerciseVariant.PUSH_UP_CLASSIC, targetReps = 10, restSeconds = 60, note = ""),
+                SetPrescription(1, variant = ExerciseVariant.PUSH_UP_CLASSIC, targetReps = 10, restSeconds = 60, note = ""),
             ),
             isTest = false,
         )
@@ -69,8 +68,8 @@ class PlannerEngineTest {
             level = ProgressionLevel.BANDED,
             difficulty = DifficultyLevel.BASE,
             prescriptions = listOf(
-                SetPrescription(0, targetReps = 8, restSeconds = 120, note = ""),
-                SetPrescription(1, targetReps = 6, restSeconds = 120, note = ""),
+                SetPrescription(0, variant = ExerciseVariant.PULL_UP_BANDED, targetReps = 8, restSeconds = 120, note = ""),
+                SetPrescription(1, variant = ExerciseVariant.PULL_UP_NEGATIVE, targetReps = 6, restSeconds = 120, note = ""),
             ),
             isTest = true,
         )
@@ -100,7 +99,7 @@ class PlannerEngineTest {
         val testWorkout = workoutSession(
             level = ProgressionLevel.BANDED,
             difficulty = DifficultyLevel.HARD,
-            prescriptions = listOf(SetPrescription(0, targetReps = 8, restSeconds = 120, note = "")),
+            prescriptions = listOf(SetPrescription(0, variant = ExerciseVariant.PULL_UP_BANDED, targetReps = 8, restSeconds = 120, note = "")),
             isTest = true,
         )
         val evaluation = engine.evaluateWorkout(
@@ -122,11 +121,32 @@ class PlannerEngineTest {
         assertThat(evaluation.suggestedState.currentLevel).isEqualTo(ProgressionLevel.STRICT)
     }
 
+    @Test
+    fun `maintenance mode schedules support phase without checkpoints`() {
+        val plan = engine.scheduleNextPhase(
+            programState = ProgramState(
+                exerciseType = ExerciseType.PULL_UP,
+                currentLevel = ProgressionLevel.STRICT,
+                currentDifficulty = DifficultyLevel.HARD,
+                bestGoalScore = 10,
+                maintenanceMode = true,
+            ),
+            preferredDays = listOf(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY, DayOfWeek.FRIDAY),
+            startDate = fixedDate,
+            phaseIndex = 3,
+        )
+
+        assertThat(plan.checkpoints).isEmpty()
+        assertThat(plan.weeks.flatMap { it.sessions }).isNotEmpty()
+        assertThat(plan.weeks.flatMap { it.sessions }.all { !it.isTest }).isTrue()
+        assertThat(plan.weeks.flatMap { it.sessions }.all { it.level == ProgressionLevel.STRICT }).isTrue()
+    }
+
     private fun successSession(): SessionResult {
         val workout = workoutSession(
             level = ProgressionLevel.BANDED,
             difficulty = DifficultyLevel.BASE,
-            prescriptions = listOf(SetPrescription(0, targetReps = 6, restSeconds = 120, note = "")),
+            prescriptions = listOf(SetPrescription(0, variant = ExerciseVariant.PULL_UP_BANDED, targetReps = 6, restSeconds = 120, note = "")),
             isTest = false,
         )
         return SessionResult(
@@ -154,6 +174,7 @@ class PlannerEngineTest {
             ExerciseType.PUSH_UP
         },
         title = "Test",
+        phaseIndex = 1,
         weekIndex = 1,
         sessionIndex = 1,
         scheduledDate = fixedDate,

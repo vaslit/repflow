@@ -1,50 +1,50 @@
 package com.vaslit.repflow.domain
 
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.util.UUID
 import kotlin.math.max
 
 interface PlannerEngine {
-    fun buildInitialPlan(assessmentResult: AssessmentResult): ProgramPlan
+    fun buildInitialPlan(
+        assessmentResult: AssessmentResult,
+        preferredDays: List<DayOfWeek>,
+        phaseIndex: Int,
+        maintenanceMode: Boolean,
+    ): ProgramPlan
+
     fun evaluateWorkout(
         sessionResult: SessionResult,
         recentHistory: List<SessionResult>,
         currentState: ProgramState,
     ): EvaluationSnapshot
 
-    fun scheduleNextPhase(programState: ProgramState): ProgramPlan
+    fun scheduleNextPhase(
+        programState: ProgramState,
+        preferredDays: List<DayOfWeek>,
+        startDate: LocalDate,
+        phaseIndex: Int,
+    ): ProgramPlan
 }
 
 class DefaultPlannerEngine(
     private val startDateProvider: () -> LocalDate = { LocalDate.now() },
 ) : PlannerEngine {
 
-    override fun buildInitialPlan(assessmentResult: AssessmentResult): ProgramPlan {
-        val checkpoints = listOf(2, 4, 6).map { week ->
-            startDateProvider().plusDays(((week - 1) * 7 + 5).toLong())
-        }
-        val weeks = (1..6).map { week ->
-            val sessions = (1..3).map { sessionIndex ->
-                val isTest = sessionIndex == 3 && week % 2 == 0
-                buildSession(
-                    exerciseType = assessmentResult.exerciseType,
-                    level = assessmentResult.level,
-                    difficulty = progressionForWeek(assessmentResult.difficulty, week),
-                    weekIndex = week,
-                    sessionIndex = sessionIndex,
-                    scheduledDate = startDateProvider().plusDays(((week - 1) * 7L) + (sessionIndex * 2L) - 2L),
-                    isTest = isTest,
-                )
-            }
-            PlanWeek(index = week, sessions = sessions)
-        }
-        return ProgramPlan(
-            exerciseType = assessmentResult.exerciseType,
-            startDate = startDateProvider(),
-            weeks = weeks,
-            checkpoints = checkpoints,
-        )
-    }
+    override fun buildInitialPlan(
+        assessmentResult: AssessmentResult,
+        preferredDays: List<DayOfWeek>,
+        phaseIndex: Int,
+        maintenanceMode: Boolean,
+    ): ProgramPlan = buildPhasePlan(
+        exerciseType = assessmentResult.exerciseType,
+        level = assessmentResult.level,
+        difficulty = assessmentResult.difficulty,
+        preferredDays = preferredDays,
+        phaseIndex = phaseIndex,
+        phaseStart = startDateProvider(),
+        maintenanceMode = maintenanceMode,
+    )
 
     override fun evaluateWorkout(
         sessionResult: SessionResult,
@@ -98,9 +98,9 @@ class DefaultPlannerEngine(
 
         val summary = when (recommendation) {
             ProgressionRecommendation.KEEP -> "План сохраняется без изменений. Держи технику и стабильность."
-            ProgressionRecommendation.DELOAD -> "Есть недобор по объему. Следующая тренировка станет легче."
+            ProgressionRecommendation.DELOAD -> "Есть недобор по объему. Следующая фаза станет легче."
             ProgressionRecommendation.ADVANCE -> "Можно перейти к следующему этапу прогрессии."
-            ProgressionRecommendation.CHANGE_BAND -> "Пора попробовать более легкую резинку на следующих тренировках."
+            ProgressionRecommendation.CHANGE_BAND -> "Пора попробовать более легкую резинку на следующей фазе."
             ProgressionRecommendation.TRY_STRICT -> "Тест пройден. Можно пробовать подтягивания без резинки."
         }
 
@@ -112,43 +112,199 @@ class DefaultPlannerEngine(
         )
     }
 
-    override fun scheduleNextPhase(programState: ProgramState): ProgramPlan {
-        return buildInitialPlan(
-            AssessmentResult(
-                exerciseType = programState.exerciseType,
-                level = programState.currentLevel,
-                difficulty = programState.currentDifficulty,
-                metrics = emptyList(),
-            ),
+    override fun scheduleNextPhase(
+        programState: ProgramState,
+        preferredDays: List<DayOfWeek>,
+        startDate: LocalDate,
+        phaseIndex: Int,
+    ): ProgramPlan = buildPhasePlan(
+        exerciseType = programState.exerciseType,
+        level = programState.currentLevel,
+        difficulty = programState.currentDifficulty,
+        preferredDays = preferredDays,
+        phaseIndex = phaseIndex,
+        phaseStart = startDate,
+        maintenanceMode = programState.maintenanceMode,
+    )
+
+    private fun buildPhasePlan(
+        exerciseType: ExerciseType,
+        level: ProgressionLevel,
+        difficulty: DifficultyLevel,
+        preferredDays: List<DayOfWeek>,
+        phaseIndex: Int,
+        phaseStart: LocalDate,
+        maintenanceMode: Boolean,
+    ): ProgramPlan {
+        val definition = ProgramCatalog.byExercise(exerciseType)
+        if (maintenanceMode) {
+            return buildMaintenancePlan(
+                definition = definition,
+                exerciseType = exerciseType,
+                level = level,
+                preferredDays = preferredDays,
+                phaseIndex = phaseIndex,
+                phaseStart = phaseStart,
+            )
+        }
+
+        val normalizedDays = normalizePreferredDays(preferredDays)
+        val trainingDates = generateTrainingDates(
+            phaseStart = phaseStart,
+            preferredDays = normalizedDays,
+        )
+        val sessionsByWeek = linkedMapOf(1 to mutableListOf<WorkoutSession>(), 2 to mutableListOf<WorkoutSession>())
+        val templates = definition.trainingTemplates(level, maintenanceMode = false)
+
+        val weeklyCounters = mutableMapOf(1 to 0, 2 to 0)
+        trainingDates.forEachIndexed { index, date ->
+            val weekIndex = if (date.isBefore(phaseStart.plusDays(7))) 1 else 2
+            val sessionIndex = weeklyCounters.getValue(weekIndex) + 1
+            weeklyCounters[weekIndex] = sessionIndex
+            val template = templates[index % templates.size]
+            sessionsByWeek.getValue(weekIndex) += buildSession(
+                exerciseType = exerciseType,
+                level = level,
+                difficulty = difficulty,
+                phaseIndex = phaseIndex,
+                weekIndex = weekIndex,
+                sessionIndex = sessionIndex,
+                scheduledDate = date,
+                template = template,
+                isTest = false,
+            )
+        }
+
+        val checkpoints = if (definition.controlMode == ControlMode.END_OF_PHASE) {
+            val controlTemplate = definition.controlTemplate(level)
+            if (controlTemplate != null && trainingDates.isNotEmpty()) {
+                val testDate = nextNonPreferredDay(requireNotNull(trainingDates.maxOrNull()).plusDays(1), normalizedDays)
+                val testWeekIndex = if (testDate.isBefore(phaseStart.plusDays(7))) 1 else 2
+                val testSessionIndex = sessionsByWeek.getValue(testWeekIndex).size + 1
+                sessionsByWeek.getValue(testWeekIndex) += buildSession(
+                    exerciseType = exerciseType,
+                    level = level,
+                    difficulty = difficulty,
+                    phaseIndex = phaseIndex,
+                    weekIndex = testWeekIndex,
+                    sessionIndex = testSessionIndex,
+                    scheduledDate = testDate,
+                    template = controlTemplate,
+                    isTest = true,
+                )
+                listOf(testDate)
+            } else {
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
+
+        return ProgramPlan(
+            exerciseType = exerciseType,
+            startDate = phaseStart,
+            weeks = sessionsByWeek.entries.map { (week, sessions) ->
+                PlanWeek(index = week, sessions = sessions.sortedBy(WorkoutSession::scheduledDate))
+            },
+            checkpoints = checkpoints,
         )
     }
 
-    private fun progressionForWeek(baseDifficulty: DifficultyLevel, week: Int): DifficultyLevel {
-        return when {
-            week >= 5 && baseDifficulty != DifficultyLevel.HARD -> DifficultyLevel.values()[baseDifficulty.ordinal + 1]
-            else -> baseDifficulty
+    private fun buildMaintenancePlan(
+        definition: TrainingProgramDefinition,
+        exerciseType: ExerciseType,
+        level: ProgressionLevel,
+        preferredDays: List<DayOfWeek>,
+        phaseIndex: Int,
+        phaseStart: LocalDate,
+    ): ProgramPlan {
+        val normalizedDays = normalizePreferredDays(preferredDays)
+        val weeklyDates = generateTrainingDates(
+            phaseStart = phaseStart,
+            preferredDays = normalizedDays,
+        )
+            .groupBy { if (it.isBefore(phaseStart.plusDays(7))) 1 else 2 }
+            .mapValues { (_, dates) -> dates.sorted().take(2) }
+
+        val templates = definition.trainingTemplates(level, maintenanceMode = true)
+        val weeks = (1..2).map { weekIndex ->
+            val sessions = weeklyDates[weekIndex].orEmpty().mapIndexed { index, date ->
+                val template = templates[index % templates.size]
+                buildSession(
+                    exerciseType = exerciseType,
+                    level = level,
+                    difficulty = DifficultyLevel.EASY,
+                    phaseIndex = phaseIndex,
+                    weekIndex = weekIndex,
+                    sessionIndex = index + 1,
+                    scheduledDate = date,
+                    template = template,
+                    isTest = false,
+                )
+            }
+            PlanWeek(index = weekIndex, sessions = sessions)
         }
+
+        return ProgramPlan(
+            exerciseType = exerciseType,
+            startDate = phaseStart,
+            weeks = weeks,
+            checkpoints = emptyList(),
+        )
+    }
+
+    private fun normalizePreferredDays(preferredDays: List<DayOfWeek>): List<DayOfWeek> {
+        val normalized = preferredDays.distinct().sortedBy { it.value }
+        return if (normalized.isEmpty()) {
+            listOf(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY, DayOfWeek.FRIDAY)
+        } else {
+            normalized
+        }
+    }
+
+    private fun generateTrainingDates(
+        phaseStart: LocalDate,
+        preferredDays: List<DayOfWeek>,
+    ): List<LocalDate> {
+        val days = (0L..13L)
+            .map { phaseStart.plusDays(it) }
+            .filter { it.dayOfWeek in preferredDays }
+        if (days.isNotEmpty()) {
+            return days
+        }
+
+        return listOf(phaseStart, phaseStart.plusDays(2), phaseStart.plusDays(4), phaseStart.plusDays(7), phaseStart.plusDays(9), phaseStart.plusDays(11))
+    }
+
+    fun nextNonPreferredDay(
+        candidate: LocalDate,
+        preferredDays: List<DayOfWeek>,
+    ): LocalDate {
+        var date = candidate
+        while (date.dayOfWeek in preferredDays) {
+            date = date.plusDays(1)
+        }
+        return date
     }
 
     private fun buildSession(
         exerciseType: ExerciseType,
         level: ProgressionLevel,
         difficulty: DifficultyLevel,
+        phaseIndex: Int,
         weekIndex: Int,
         sessionIndex: Int,
         scheduledDate: LocalDate,
+        template: DayProgramTemplate,
         isTest: Boolean,
     ): WorkoutSession {
-        val prescriptions = if (isTest) {
-            buildTestPrescriptions(level)
-        } else {
-            buildTrainingPrescriptions(level, difficulty, sessionIndex)
-        }
+        val prescriptions = buildPrescriptionsFromTemplate(template, level, difficulty)
 
         return WorkoutSession(
             id = UUID.randomUUID().toString(),
             exerciseType = exerciseType,
-            title = if (isTest) "Контрольный тест" else "Тренировка $sessionIndex",
+            title = template.title,
+            phaseIndex = phaseIndex,
             weekIndex = weekIndex,
             sessionIndex = sessionIndex,
             scheduledDate = scheduledDate,
@@ -162,64 +318,24 @@ class DefaultPlannerEngine(
         )
     }
 
-    private fun buildTrainingPrescriptions(
+    private fun buildPrescriptionsFromTemplate(
+        template: DayProgramTemplate,
         level: ProgressionLevel,
         difficulty: DifficultyLevel,
-        sessionIndex: Int,
     ): List<SetPrescription> {
-        val baseTarget = when (level) {
-            ProgressionLevel.SCAPULAR_HANG -> 15
-            ProgressionLevel.NEGATIVE -> 3
-            ProgressionLevel.BANDED -> 4
-            ProgressionLevel.STRICT -> 3
-            ProgressionLevel.WALL -> 10
-            ProgressionLevel.INCLINE -> 8
-            ProgressionLevel.KNEE -> 6
-            ProgressionLevel.CLASSIC -> 5
+        var setIndex = 0
+        return template.blocks.flatMap { block ->
+            (0 until block.sets).map { localIndex ->
+                SetPrescription(
+                    setIndex = setIndex++,
+                    variant = block.variant,
+                    targetReps = block.repsResolver?.invoke(level, difficulty, localIndex),
+                    targetSeconds = block.secondsResolver?.invoke(level, difficulty, localIndex),
+                    restSeconds = block.restSeconds,
+                    note = block.note,
+                )
+            }
         }
-        val increment = when (difficulty) {
-            DifficultyLevel.EASY -> 0
-            DifficultyLevel.BASE -> 2
-            DifficultyLevel.HARD -> 4
-        }
-        val sets = if (sessionIndex == 1) 4 else 5
-        return (0 until sets).map { index ->
-            SetPrescription(
-                setIndex = index,
-                targetReps = if (level in timedLevels) null else max(1, baseTarget + increment - (index / 2)),
-                targetSeconds = if (level in timedLevels) baseTarget + increment + (index * 2) else null,
-                restSeconds = when (level) {
-                    ProgressionLevel.STRICT,
-                    ProgressionLevel.BANDED,
-                    ProgressionLevel.NEGATIVE -> 120
-                    else -> 75
-                },
-                note = when (level) {
-                    ProgressionLevel.SCAPULAR_HANG -> "Пауза в нижнем положении, лопатки вниз."
-                    ProgressionLevel.NEGATIVE -> "Опускание 3-5 секунд."
-                    else -> "Работай в полном диапазоне и без рывков."
-                },
-            )
-        }
-    }
-
-    private fun buildTestPrescriptions(level: ProgressionLevel): List<SetPrescription> {
-        return listOf(
-            SetPrescription(
-                setIndex = 0,
-                targetReps = if (level in timedLevels) null else testTarget(level),
-                targetSeconds = if (level in timedLevels) testTarget(level) else null,
-                restSeconds = 150,
-                note = "Один основной тестовый подход после разминки.",
-            ),
-            SetPrescription(
-                setIndex = 1,
-                targetReps = if (level in timedLevels) null else max(1, testTarget(level) - 2),
-                targetSeconds = if (level in timedLevels) max(10, testTarget(level) - 5) else null,
-                restSeconds = 120,
-                note = "Контрольный подход на качество техники.",
-            ),
-        )
     }
 
     private fun nextLevelIfNeeded(
@@ -279,18 +395,4 @@ class DefaultPlannerEngine(
         return actual >= target
     }
 
-    private fun testTarget(level: ProgressionLevel): Int = when (level) {
-        ProgressionLevel.SCAPULAR_HANG -> 20
-        ProgressionLevel.NEGATIVE -> 4
-        ProgressionLevel.BANDED -> 8
-        ProgressionLevel.STRICT -> 5
-        ProgressionLevel.WALL -> 18
-        ProgressionLevel.INCLINE -> 15
-        ProgressionLevel.KNEE -> 12
-        ProgressionLevel.CLASSIC -> 10
-    }
-
-    private companion object {
-        val timedLevels = setOf(ProgressionLevel.SCAPULAR_HANG)
-    }
 }

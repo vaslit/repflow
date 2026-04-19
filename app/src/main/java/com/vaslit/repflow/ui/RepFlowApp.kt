@@ -1,34 +1,48 @@
 package com.vaslit.repflow.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -42,38 +56,59 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.vaslit.repflow.data.ProgramDetail
+import com.vaslit.repflow.data.AnalyticsEntry
+import com.vaslit.repflow.data.DashboardProgram
+import com.vaslit.repflow.data.DashboardState
+import com.vaslit.repflow.data.ProgramAnalytics
 import com.vaslit.repflow.data.ProgramSummary
+import com.vaslit.repflow.data.WorkoutCalendarItem
+import com.vaslit.repflow.data.WorkoutCalendarStatus
 import com.vaslit.repflow.domain.EvaluationSnapshot
 import com.vaslit.repflow.domain.ExerciseType
 import com.vaslit.repflow.domain.ProgressionLevel
 import com.vaslit.repflow.domain.SetResult
 import com.vaslit.repflow.domain.WorkoutSession
 import kotlinx.coroutines.delay
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 @Composable
 fun RepFlowTheme(content: @Composable () -> Unit) {
-    val scheme = androidx.compose.material3.lightColorScheme(
-        primary = Color(0xFF7A3E12),
-        onPrimary = Color(0xFFFFF7F1),
-        secondary = Color(0xFF49635A),
-        onSecondary = Color(0xFFF6FBF7),
-        tertiary = Color(0xFFA2462D),
-        background = Color(0xFFF7F2EA),
-        surface = Color(0xFFFFFCF7),
-        surfaceVariant = Color(0xFFE9DDD0),
-        onSurface = Color(0xFF261A14),
+    val scheme = darkColorScheme(
+        primary = Color(0xFF6FD3FF),
+        onPrimary = Color(0xFF09111A),
+        secondary = Color(0xFFFF9D5C),
+        onSecondary = Color(0xFF24150B),
+        tertiary = Color(0xFF9AE2B5),
+        background = Color(0xFF0A1017),
+        surface = Color(0xFF121A24),
+        surfaceVariant = Color(0xFF182230),
+        onSurface = Color(0xFFE8F0FF),
+        onSurfaceVariant = Color(0xFF9FB0C7),
     )
     MaterialTheme(
         colorScheme = scheme,
@@ -85,169 +120,525 @@ fun RepFlowTheme(content: @Composable () -> Unit) {
 @Composable
 fun RepFlowApp(viewModel: AppViewModel) {
     val navController = rememberNavController()
+    val currentEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = currentEntry?.destination?.route.orEmpty()
+    val mainTabs = remember { listOf(MainTab.Plans, MainTab.Calendar, MainTab.Stats) }
+    val showBottomBar = mainTabs.any { currentRoute.startsWith(it.route) }
+    val dashboard by viewModel.dashboard.collectAsState()
     val programs by viewModel.programSummaries.collectAsState()
+    val calendarItems by viewModel.calendarItems.collectAsState()
 
-    NavHost(
-        navController = navController,
-        startDestination = "home",
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        bottomBar = {
+            if (showBottomBar) {
+                NeoBottomBar(
+                    currentRoute = currentRoute,
+                    tabs = mainTabs,
+                    onSelect = { route ->
+                        navController.navigate(route) {
+                            popUpTo("plans") { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
+            }
+        },
+    ) { padding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.background,
+                            Color(0xFF0F1825),
+                            Color(0xFF0A1017),
+                        ),
+                    ),
+                )
+                .padding(padding),
+        ) {
+            NavHost(
+                navController = navController,
+                startDestination = "plans",
+            ) {
+                composable("plans") {
+                    PlansScreen(
+                        dashboard = dashboard,
+                        programs = programs,
+                        onStartAssessment = { navController.navigate("assessment/${it.name}") },
+                        onOpenSession = { item ->
+                            navController.navigate("session/${item.exerciseType.name}/${item.id}")
+                        },
+                    )
+                }
+                composable("calendar") {
+                    CalendarScreen(
+                        items = calendarItems,
+                        onOpenSession = { item ->
+                            navController.navigate("session/${item.exerciseType.name}/${item.id}")
+                        },
+                        onMoveWorkout = viewModel::moveWorkout,
+                    )
+                }
+                composable("stats") {
+                    StatsScreen(
+                        programs = programs,
+                        observeAnalytics = viewModel::observeAnalytics,
+                    )
+                }
+                composable(
+                    route = "assessment/{type}",
+                    arguments = listOf(navArgument("type") { type = NavType.StringType }),
+                ) { backStackEntry ->
+                    val exerciseType = ExerciseType.valueOf(requireNotNull(backStackEntry.arguments?.getString("type")))
+                    AssessmentScreen(
+                        exerciseType = exerciseType,
+                        viewModel = viewModel,
+                        onBack = { navController.popBackStack() },
+                        onCreated = {
+                            navController.navigate("plans") {
+                                popUpTo("plans") { inclusive = true }
+                            }
+                        },
+                    )
+                }
+                composable(
+                    route = "session/{type}/{workoutId}",
+                    arguments = listOf(
+                        navArgument("type") { type = NavType.StringType },
+                        navArgument("workoutId") { type = NavType.StringType },
+                    ),
+                ) { backStackEntry ->
+                    val exerciseType = ExerciseType.valueOf(requireNotNull(backStackEntry.arguments?.getString("type")))
+                    val workoutId = requireNotNull(backStackEntry.arguments?.getString("workoutId"))
+                    SessionScreen(
+                        exerciseType = exerciseType,
+                        workoutId = workoutId,
+                        viewModel = viewModel,
+                        onBack = { navController.popBackStack() },
+                        onFinished = { navController.navigate("summary/${exerciseType.name}") },
+                    )
+                }
+                composable(
+                    route = "summary/{type}",
+                    arguments = listOf(navArgument("type") { type = NavType.StringType }),
+                ) { backStackEntry ->
+                    val exerciseType = ExerciseType.valueOf(requireNotNull(backStackEntry.arguments?.getString("type")))
+                    val evaluation by viewModel.lastEvaluation.collectAsState()
+                    CompletionScreen(
+                        exerciseType = exerciseType,
+                        evaluation = evaluation,
+                        onDone = {
+                            navController.navigate("plans") {
+                                popUpTo("plans") { inclusive = true }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+private enum class MainTab(
+    val route: String,
+    val label: String,
+) {
+    Plans("plans", "Планы"),
+    Calendar("calendar", "Календарь"),
+    Stats("stats", "Статистика"),
+}
+
+@Composable
+private fun NeoBottomBar(
+    currentRoute: String,
+    tabs: List<MainTab>,
+    onSelect: (String) -> Unit,
+) {
+    Surface(
+        tonalElevation = 0.dp,
+        color = Color.Transparent,
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
-        composable("home") {
-            HomeScreen(
-                programs = programs,
-                onStartAssessment = { navController.navigate("assessment/${it.name}") },
-                onOpenPlan = { navController.navigate("plan/${it.name}") },
+        NavigationBar(
+            containerColor = MaterialTheme.colorScheme.surface,
+            tonalElevation = 0.dp,
+            modifier = Modifier
+                .shadow(20.dp, RoundedCornerShape(32.dp), spotColor = Color.Black.copy(alpha = 0.45f))
+                .clip(RoundedCornerShape(32.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.05f), RoundedCornerShape(32.dp)),
+        ) {
+            tabs.forEach { tab ->
+                val selected = currentRoute.startsWith(tab.route)
+                NavigationBarItem(
+                    selected = selected,
+                    onClick = { onSelect(tab.route) },
+                    icon = {
+                        MainTabIcon(tab = tab, selected = selected)
+                    },
+                    label = { Text(tab.label) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MainTabIcon(
+    tab: MainTab,
+    selected: Boolean,
+) {
+    val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    Canvas(modifier = Modifier.size(22.dp)) {
+        val strokeWidth = 2.2.dp.toPx()
+        val thinStroke = 1.6.dp.toPx()
+        when (tab) {
+            MainTab.Plans -> {
+                val left = size.width * 0.14f
+                val right = size.width * 0.86f
+                val rows = listOf(0.28f, 0.5f, 0.72f)
+                rows.forEach { yFactor ->
+                    val y = size.height * yFactor
+                    drawCircle(
+                        color = color,
+                        radius = 1.8.dp.toPx(),
+                        center = Offset(left, y),
+                    )
+                    drawLine(
+                        color = color,
+                        start = Offset(size.width * 0.3f, y),
+                        end = Offset(right, y),
+                        strokeWidth = strokeWidth,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
+
+            MainTab.Calendar -> {
+                val pad = size.width * 0.12f
+                val top = size.height * 0.2f
+                val bottom = size.height * 0.86f
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(pad, top),
+                    size = androidx.compose.ui.geometry.Size(size.width - pad * 2, bottom - top),
+                    cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
+                    style = Stroke(width = strokeWidth),
+                )
+                drawLine(
+                    color = color,
+                    start = Offset(pad, size.height * 0.36f),
+                    end = Offset(size.width - pad, size.height * 0.36f),
+                    strokeWidth = thinStroke,
+                    cap = StrokeCap.Round,
+                )
+                listOf(0.32f, 0.68f).forEach { xFactor ->
+                    val x = size.width * xFactor
+                    drawLine(
+                        color = color,
+                        start = Offset(x, top - 1.dp.toPx()),
+                        end = Offset(x, size.height * 0.28f),
+                        strokeWidth = strokeWidth,
+                        cap = StrokeCap.Round,
+                    )
+                }
+                listOf(0.5f, 0.68f).forEach { yFactor ->
+                    val y = size.height * yFactor
+                    drawLine(
+                        color = color.copy(alpha = 0.8f),
+                        start = Offset(size.width * 0.26f, y),
+                        end = Offset(size.width * 0.74f, y),
+                        strokeWidth = thinStroke,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
+
+            MainTab.Stats -> {
+                val xAxisY = size.height * 0.82f
+                val xStart = size.width * 0.16f
+                val xEnd = size.width * 0.86f
+                val yStart = size.height * 0.16f
+                drawLine(
+                    color = color.copy(alpha = 0.75f),
+                    start = Offset(xStart, yStart),
+                    end = Offset(xStart, xAxisY),
+                    strokeWidth = thinStroke,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = color.copy(alpha = 0.75f),
+                    start = Offset(xStart, xAxisY),
+                    end = Offset(xEnd, xAxisY),
+                    strokeWidth = thinStroke,
+                    cap = StrokeCap.Round,
+                )
+
+                val path = Path().apply {
+                    moveTo(size.width * 0.22f, size.height * 0.72f)
+                    lineTo(size.width * 0.42f, size.height * 0.58f)
+                    lineTo(size.width * 0.58f, size.height * 0.63f)
+                    lineTo(size.width * 0.78f, size.height * 0.34f)
+                }
+                drawPath(
+                    path = path,
+                    color = color,
+                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+                )
+
+                val arrow = Path().apply {
+                    moveTo(size.width * 0.78f, size.height * 0.34f)
+                    lineTo(size.width * 0.69f, size.height * 0.35f)
+                    moveTo(size.width * 0.78f, size.height * 0.34f)
+                    lineTo(size.width * 0.75f, size.height * 0.43f)
+                }
+                drawPath(
+                    path = arrow,
+                    color = color,
+                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun PlansScreen(
+    dashboard: DashboardState,
+    programs: List<ProgramSummary>,
+    onStartAssessment: (ExerciseType) -> Unit,
+    onOpenSession: (WorkoutCalendarItem) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        item {
+            NeoPanel {
+                Text("RepFlow", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "План на сегодня, календарь тренировок и прогресс по целям.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        item {
+            Text("Программы", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
+
+        exerciseCards.forEach { type ->
+            item {
+                val summary = programs.firstOrNull { it.exerciseType == type }
+                val programCard = dashboard.programs.firstOrNull { it.exerciseType == type }
+                ProgramOverviewCard(
+                    exerciseType = type,
+                    summary = summary,
+                    dashboardProgram = programCard,
+                    onStartAssessment = { onStartAssessment(type) },
+                    onOpenSession = {
+                        programCard?.nextWorkout?.let(onOpenSession)
+                    },
+                )
+            }
+        }
+
+        item {
+            AgendaSection(
+                title = "Сегодня",
+                items = dashboard.todayItems,
+                emptyText = "Сегодня нет запланированных тренировок.",
+                onOpenSession = onOpenSession,
             )
         }
-        composable(
-            route = "assessment/{type}",
-            arguments = listOf(navArgument("type") { type = NavType.StringType }),
-        ) { backStackEntry ->
-            val exerciseType = ExerciseType.valueOf(requireNotNull(backStackEntry.arguments?.getString("type")))
-            AssessmentScreen(
-                exerciseType = exerciseType,
-                viewModel = viewModel,
-                onBack = { navController.popBackStack() },
-                onCreated = {
-                    navController.navigate("plan/${exerciseType.name}") {
-                        popUpTo("home")
-                    }
-                },
+        item {
+            AgendaSection(
+                title = "Завтра",
+                items = dashboard.tomorrowItems,
+                emptyText = "На завтра пока пусто.",
+                onOpenSession = onOpenSession,
             )
         }
-        composable(
-            route = "plan/{type}",
-            arguments = listOf(navArgument("type") { type = NavType.StringType }),
-        ) { backStackEntry ->
-            val exerciseType = ExerciseType.valueOf(requireNotNull(backStackEntry.arguments?.getString("type")))
-            val detail by viewModel.observeProgramDetail(exerciseType).collectAsState(initial = null)
-            ProgramScreen(
-                exerciseType = exerciseType,
-                detail = detail,
-                onBack = { navController.popBackStack() },
-                onOpenSession = { workoutId -> navController.navigate("session/${exerciseType.name}/$workoutId") },
-                onOpenHistory = { navController.navigate("history/${exerciseType.name}") },
-                onOpenTechnique = { navController.navigate("technique/${exerciseType.name}") },
-            )
-        }
-        composable(
-            route = "session/{type}/{workoutId}",
-            arguments = listOf(
-                navArgument("type") { type = NavType.StringType },
-                navArgument("workoutId") { type = NavType.StringType },
-            ),
-        ) { backStackEntry ->
-            val exerciseType = ExerciseType.valueOf(requireNotNull(backStackEntry.arguments?.getString("type")))
-            val workoutId = requireNotNull(backStackEntry.arguments?.getString("workoutId"))
-            SessionScreen(
-                exerciseType = exerciseType,
-                workoutId = workoutId,
-                viewModel = viewModel,
-                onBack = { navController.popBackStack() },
-                onFinished = { navController.navigate("summary/${exerciseType.name}") },
-            )
-        }
-        composable(
-            route = "summary/{type}",
-            arguments = listOf(navArgument("type") { type = NavType.StringType }),
-        ) { backStackEntry ->
-            val exerciseType = ExerciseType.valueOf(requireNotNull(backStackEntry.arguments?.getString("type")))
-            val evaluation by viewModel.lastEvaluation.collectAsState()
-            CompletionScreen(
-                exerciseType = exerciseType,
-                evaluation = evaluation,
-                onDone = {
-                    navController.navigate("plan/${exerciseType.name}") {
-                        popUpTo("home")
-                    }
-                },
-            )
-        }
-        composable(
-            route = "history/{type}",
-            arguments = listOf(navArgument("type") { type = NavType.StringType }),
-        ) { backStackEntry ->
-            val exerciseType = ExerciseType.valueOf(requireNotNull(backStackEntry.arguments?.getString("type")))
-            val detail by viewModel.observeProgramDetail(exerciseType).collectAsState(initial = null)
-            HistoryScreen(
-                exerciseType = exerciseType,
-                detail = detail,
-                onBack = { navController.popBackStack() },
-            )
-        }
-        composable(
-            route = "technique/{type}",
-            arguments = listOf(navArgument("type") { type = NavType.StringType }),
-        ) { backStackEntry ->
-            val exerciseType = ExerciseType.valueOf(requireNotNull(backStackEntry.arguments?.getString("type")))
-            TechniqueScreen(
-                exerciseType = exerciseType,
-                guide = viewModel.techniqueGuide(exerciseType),
-                onBack = { navController.popBackStack() },
+        item {
+            AgendaSection(
+                title = "Позже",
+                items = dashboard.laterItems.take(8),
+                emptyText = "Следующие тренировки появятся после завершения текущего цикла.",
+                onOpenSession = onOpenSession,
             )
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HomeScreen(
-    programs: List<ProgramSummary>,
-    onStartAssessment: (ExerciseType) -> Unit,
-    onOpenPlan: (ExerciseType) -> Unit,
+private fun ProgramOverviewCard(
+    exerciseType: ExerciseType,
+    summary: ProgramSummary?,
+    dashboardProgram: DashboardProgram?,
+    onStartAssessment: () -> Unit,
+    onOpenSession: () -> Unit,
 ) {
-    val gradient = Brush.verticalGradient(listOf(Color(0xFFEFDCC7), Color(0xFFF7F2EA)))
-    Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("Тренер прогрессии") })
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(gradient)
-                .padding(padding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+    val accent = exerciseColor(exerciseType)
+    NeoPanel(accent = accent) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
         ) {
-            Text(
-                text = "Подтягивания и отжимания с тестами, паузами и адаптивным планом на 6 недель.",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            exerciseCards.forEach { type ->
-                val summary = programs.firstOrNull { it.exerciseType == type }
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    shape = RoundedCornerShape(28.dp),
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text(type.title(), style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            if (summary == null) {
-                                "Пройди первичный тест, чтобы получить стартовый уровень, паузы и план."
-                            } else {
-                                "Текущий уровень: ${summary.currentLevel.title(type)}. Сложность: ${summary.currentDifficulty.title()}."
-                            },
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            if (summary == null) {
-                                Button(onClick = { onStartAssessment(type) }) {
-                                    Text("Пройти тест")
-                                }
-                            } else {
-                                Button(onClick = { onOpenPlan(type) }) {
-                                    Text("Открыть план")
-                                }
-                            }
-                        }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(exerciseType.title(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (summary == null) {
+                    Text("Пройди стартовый тест и выбери удобные дни тренировок.")
+                } else {
+                    Text(summary.title, color = accent, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Уровень: ${summary.currentLevel.title(exerciseType)} • ${summary.currentDifficulty.title()}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Дни: ${summary.preferredDays.joinToString(" • ") { it.shortLabel() }}",
+                        color = accent.copy(alpha = 0.9f),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        if (summary.maintenanceMode) {
+                            "Цель достигнута: ${summary.goalLabel}"
+                        } else {
+                            "Финальная цель: ${summary.goalLabel}"
+                        },
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    GoalProgressBar(
+                        current = summary.bestGoalScore,
+                        target = summary.goalTarget,
+                        accent = accent,
+                    )
+                    summary.nextWorkoutDate?.let {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Следующая: ${it.format(fullDateFormatter)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
+            PlanTypeBadge(exerciseType = exerciseType)
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (dashboardProgram?.nextWorkout != null) {
+                PrimaryNeoButton(
+                    text = if (summary?.maintenanceMode == true) {
+                        "Поддержка"
+                    } else if (dashboardProgram.nextWorkout.scheduledDate == LocalDate.now()) {
+                        "Старт сегодня"
+                    } else {
+                        "Открыть план"
+                    },
+                    accent = accent,
+                    onClick = onOpenSession,
+                )
+            } else {
+                PrimaryNeoButton(
+                    text = "Пройти тест",
+                    accent = accent,
+                    onClick = onStartAssessment,
+                )
+            }
+            SecondaryNeoButton(text = "Тест заново", onClick = onStartAssessment)
+        }
+    }
+}
+
+@Composable
+private fun GoalProgressBar(
+    current: Int,
+    target: Int,
+    accent: Color,
+) {
+    val progress = (current.toFloat() / target.toFloat()).coerceIn(0f, 1f)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("Прогресс к цели", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("$current / $target", color = accent, fontWeight = FontWeight.Bold)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(10.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(progress)
+                    .height(10.dp)
+                    .clip(CircleShape)
+                    .background(accent),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AgendaSection(
+    title: String,
+    items: List<WorkoutCalendarItem>,
+    emptyText: String,
+    onOpenSession: (WorkoutCalendarItem) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        if (items.isEmpty()) {
+            NeoPanel {
+                Text(emptyText, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            items.forEach { item ->
+                AgendaWorkoutCard(item = item, onOpenSession = { onOpenSession(item) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgendaWorkoutCard(
+    item: WorkoutCalendarItem,
+    onOpenSession: () -> Unit,
+) {
+    val accent = exerciseColor(item.exerciseType)
+    NeoPanel(accent = accent) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(item.title, fontWeight = FontWeight.Bold)
+                Text(
+                    "${item.exerciseType.title()} • ${item.scheduledDate.format(fullDateFormatter)}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            StatusBadge(item.status)
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        if (item.status == WorkoutCalendarStatus.PLANNED) {
+            PrimaryNeoButton(
+                text = if (item.isTest) "Открыть тест" else "Открыть тренировку",
+                accent = accent,
+                onClick = onOpenSession,
+            )
         }
     }
 }
@@ -260,19 +651,19 @@ private fun AssessmentScreen(
     onBack: () -> Unit,
     onCreated: () -> Unit,
 ) {
+    val existingProgram by viewModel.observeProgramDetail(exerciseType).collectAsState(initial = null)
     val metrics = remember(exerciseType) { viewModel.defaultMetrics(exerciseType) }
     val values = remember(exerciseType) {
         mutableStateMapOf<String, String>().apply {
             putAll(metrics.associate { it.key to "0" })
         }
     }
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Стартовый тест") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Назад") } },
-            )
-        },
+    val defaultDays = remember { listOf(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY, DayOfWeek.FRIDAY) }
+    val selectedDays = remember(exerciseType) { mutableStateListOf<DayOfWeek>().apply { addAll(defaultDays) } }
+
+    NeoScaffold(
+        title = "Стартовый тест",
+        onBack = onBack,
     ) { padding ->
         Column(
             modifier = Modifier
@@ -282,77 +673,164 @@ private fun AssessmentScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text(
-                text = "${exerciseType.title()}: внеси максимум по каждому варианту. План начнется с самого сильного уверенного уровня.",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            metrics.forEach { metric ->
-                OutlinedTextField(
-                    value = values.getValue(metric.key),
-                    onValueChange = { updated -> values[metric.key] = updated.filter(Char::isDigit).ifEmpty { "0" } },
-                    label = { Text(metric.label) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
+            NeoPanel(accent = exerciseColor(exerciseType)) {
+                Text(
+                    text = "${exerciseType.title()}: внеси максимум по каждому варианту и выбери дни, когда тебе реально удобно тренироваться.",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                if (existingProgram != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Повторный тест начнет новый цикл тренировок, а текущий сохранится в истории.",
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
+                }
+            }
+
+            NeoPanel {
+                Text("Предпочитаемые дни", fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    weekDays.forEach { day ->
+                        FilterChip(
+                            selected = day in selectedDays,
+                            onClick = {
+                                if (day in selectedDays) {
+                                    if (selectedDays.size > 1) {
+                                        selectedDays.remove(day)
+                                    }
+                                } else {
+                                    selectedDays += day
+                                }
+                            },
+                            label = { Text(day.shortLabel()) },
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "После теста приложение составит ближайший цикл тренировок и отдельный контрольный день.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Button(
+
+            metrics.forEach { metric ->
+                NeoPanel {
+                    OutlinedTextField(
+                        value = values.getValue(metric.key),
+                        onValueChange = { updated -> values[metric.key] = updated.filter(Char::isDigit).ifEmpty { "0" } },
+                        label = { Text(metric.label) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            PrimaryNeoButton(
+                text = if (existingProgram == null) "Собрать фазу" else "Пересобрать фазу",
+                accent = exerciseColor(exerciseType),
+                enabled = selectedDays.isNotEmpty(),
                 onClick = {
                     val result = viewModel.buildAssessmentResult(
                         exerciseType = exerciseType,
                         values = values.mapValues { (_, raw) -> raw.toIntOrNull() ?: 0 },
                     )
-                    viewModel.createProgram(result, onCreated)
+                    viewModel.createProgram(result, selectedDays.toList(), onCreated)
                 },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Создать программу")
-            }
+            )
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProgramScreen(
-    exerciseType: ExerciseType,
-    detail: ProgramDetail?,
-    onBack: () -> Unit,
-    onOpenSession: (String) -> Unit,
-    onOpenHistory: () -> Unit,
-    onOpenTechnique: () -> Unit,
+internal fun CalendarScreen(
+    items: List<WorkoutCalendarItem>,
+    onOpenSession: (WorkoutCalendarItem) -> Unit,
+    onMoveWorkout: (String, LocalDate) -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(exerciseType.title()) },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Назад") } },
-            )
-        },
-    ) { padding ->
-        if (detail == null) {
-            Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("Сначала создай программу на главном экране.")
-            }
-        } else {
-            val nextWorkout = detail.workouts.firstOrNull { !it.completed }
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                item {
-                    SummaryCard(
-                        detail = detail,
-                        nextWorkout = nextWorkout,
-                        onOpenSession = onOpenSession,
-                        onOpenHistory = onOpenHistory,
-                        onOpenTechnique = onOpenTechnique,
+    var month by rememberSaveable { mutableStateOf(YearMonth.now()) }
+    var selectedDate by rememberSaveable { mutableStateOf(LocalDate.now()) }
+    var workoutToMove by remember { mutableStateOf<WorkoutCalendarItem?>(null) }
+
+    if (workoutToMove != null) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = workoutToMove?.scheduledDate?.atStartOfDay(ZoneId.systemDefault())?.toInstant()?.toEpochMilli(),
+        )
+        DatePickerDialog(
+            onDismissRequest = { workoutToMove = null },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val millis = datePickerState.selectedDateMillis
+                        if (millis != null) {
+                            val newDate = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
+                            onMoveWorkout(workoutToMove!!.id, newDate)
+                        }
+                        workoutToMove = null
+                    },
+                ) {
+                    Text("Перенести")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { workoutToMove = null }) {
+                    Text("Отмена")
+                }
+            },
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    val monthItems = remember(items, month) {
+        items.filter { YearMonth.from(it.scheduledDate) == month }.groupBy(WorkoutCalendarItem::scheduledDate)
+    }
+    val selectedItems = items.filter { it.scheduledDate == selectedDate }
+
+    NeoScaffold(title = "Календарь") { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item {
+                NeoPanel {
+                    CalendarHeader(month = month, onPrevious = { month = month.minusMonths(1) }, onNext = { month = month.plusMonths(1) })
+                    Spacer(modifier = Modifier.height(12.dp))
+                    CalendarGrid(
+                        month = month,
+                        itemsByDate = monthItems,
+                        selectedDate = selectedDate,
+                        onSelectDate = { selectedDate = it },
                     )
                 }
-                items(detail.workouts, key = { it.id }) { workout ->
-                    WorkoutCard(workout = workout, onOpenSession = onOpenSession)
+            }
+            item {
+                Text(
+                    "Выбрано: ${selectedDate.format(fullDateFormatter)}",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            if (selectedItems.isEmpty()) {
+                item {
+                    NeoPanel {
+                        Text("На эту дату ничего не запланировано.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            } else {
+                items(selectedItems, key = { it.id }) { item ->
+                    CalendarItemCard(
+                        item = item,
+                        onOpenSession = { onOpenSession(item) },
+                        onMove = { workoutToMove = item },
+                    )
                 }
             }
         }
@@ -360,64 +838,457 @@ private fun ProgramScreen(
 }
 
 @Composable
-private fun SummaryCard(
-    detail: ProgramDetail,
-    nextWorkout: WorkoutSession?,
-    onOpenSession: (String) -> Unit,
-    onOpenHistory: () -> Unit,
-    onOpenTechnique: () -> Unit,
+private fun CalendarHeader(
+    month: YearMonth,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
 ) {
-    Card(shape = RoundedCornerShape(28.dp)) {
-        Column(
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(onClick = onPrevious) { Text("←") }
+        Text(month.format(monthFormatter), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        TextButton(onClick = onNext) { Text("→") }
+    }
+}
+
+@Composable
+private fun CalendarGrid(
+    month: YearMonth,
+    itemsByDate: Map<LocalDate, List<WorkoutCalendarItem>>,
+    selectedDate: LocalDate,
+    onSelectDate: (LocalDate) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            weekDays.forEach { day ->
+                Text(
+                    text = day.shortLabel(),
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        val firstDay = month.atDay(1)
+        val offset = firstDay.dayOfWeek.value - 1
+        val dates = buildList<LocalDate?> {
+            repeat(offset) { add(null) }
+            (1..month.lengthOfMonth()).forEach { add(month.atDay(it)) }
+            while (size % 7 != 0) add(null)
+        }
+
+        dates.chunked(7).forEach { week ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                week.forEach { date ->
+                    CalendarDayCell(
+                        date = date,
+                        items = date?.let(itemsByDate::get).orEmpty(),
+                        selected = date == selectedDate,
+                        onClick = { date?.let(onSelectDate) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarDayCell(
+    date: LocalDate?,
+    items: List<WorkoutCalendarItem>,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(18.dp)
+    val dominantStatus = remember(items) { dominantCalendarStatus(items) }
+    val dominantColor = dominantStatus?.let(::statusColor)
+    val highlightedBackground = dominantColor?.copy(alpha = 0.16f)
+    Box(
+        modifier = modifier
+            .aspectRatio(0.9f)
+            .clip(shape)
+            .background(
+                if (selected) {
+                    Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface))
+                } else {
+                    Brush.verticalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.surface,
+                            highlightedBackground ?: MaterialTheme.colorScheme.background,
+                        ),
+                    )
+                },
+            )
+            .border(
+                1.dp,
+                when {
+                    selected -> MaterialTheme.colorScheme.primary
+                    dominantColor != null -> dominantColor.copy(alpha = 0.45f)
+                    else -> Color.White.copy(alpha = 0.04f)
+                },
+                shape,
+            )
+            .clickable(enabled = date != null, onClick = onClick)
+            .padding(8.dp),
+    ) {
+        if (date != null) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = date.dayOfMonth.toString(),
+                    fontWeight = if (date == LocalDate.now()) FontWeight.Black else FontWeight.Medium,
+                    color = if (date == LocalDate.now()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items.take(2).forEach { item ->
+                        CalendarItemInlineBadge(item = item)
+                    }
+                    if (items.size > 2) {
+                        Text(
+                            "+${items.size - 2} еще",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarItemInlineBadge(
+    item: WorkoutCalendarItem,
+) {
+    val status = statusColor(item.status)
+    val accent = exerciseColor(item.exerciseType)
+    Surface(
+        color = status.copy(alpha = 0.18f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Текущий блок", style = MaterialTheme.typography.titleLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(onClick = {}, label = { Text(detail.summary.currentLevel.title(detail.summary.exerciseType)) })
-                AssistChip(onClick = {}, label = { Text(detail.summary.currentDifficulty.title()) })
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(accent)
+                    .border(1.dp, status, CircleShape),
+            )
+            Text(
+                text = calendarItemCompactLabel(item),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CalendarItemCard(
+    item: WorkoutCalendarItem,
+    onOpenSession: () -> Unit,
+    onMove: () -> Unit,
+) {
+    val accent = exerciseColor(item.exerciseType)
+    NeoPanel(accent = accent) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(item.title, fontWeight = FontWeight.Bold)
+                Text(
+                    item.exerciseType.title(),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "Блок ${item.phaseIndex}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Text(detail.techniqueTip.body)
-            if (nextWorkout != null) {
-                Button(onClick = { onOpenSession(nextWorkout.id) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Начать: ${nextWorkout.title.lowercase()}")
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                TextButton(onClick = onOpenHistory) { Text("История") }
-                TextButton(onClick = onOpenTechnique) { Text("Техника") }
+            StatusBadge(item.status)
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (item.status == WorkoutCalendarStatus.PLANNED) {
+                PrimaryNeoButton(
+                    text = if (item.isTest) "Открыть тест" else "Открыть",
+                    accent = accent,
+                    onClick = onOpenSession,
+                )
+                SecondaryNeoButton(text = "Перенести", onClick = onMove)
+            } else {
+                Text(
+                    when (item.status) {
+                        WorkoutCalendarStatus.COMPLETED_STRONG -> "Выполнено уверенно"
+                        WorkoutCalendarStatus.COMPLETED_OK -> "Выполнено с запасом на корректировку"
+                        WorkoutCalendarStatus.MISSED -> "Пропущено"
+                        WorkoutCalendarStatus.PLANNED -> ""
+                    },
+                    color = statusColor(item.status),
+                )
             }
         }
     }
 }
 
 @Composable
-private fun WorkoutCard(
-    workout: WorkoutSession,
-    onOpenSession: (String) -> Unit,
+internal fun StatsScreen(
+    programs: List<ProgramSummary>,
+    observeAnalytics: (ExerciseType) -> kotlinx.coroutines.flow.Flow<ProgramAnalytics?>,
 ) {
-    Card(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (workout.completed) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
-        ),
+    var selectedType by remember { mutableStateOf<ExerciseType?>(null) }
+    var selectedRange by rememberSaveable { mutableStateOf(StatsRange.MONTH) }
+
+    LaunchedEffect(programs) {
+        if (selectedType == null || programs.none { it.exerciseType == selectedType }) {
+            selectedType = programs.firstOrNull()?.exerciseType
+        }
+    }
+
+    val analyticsState = if (selectedType != null) {
+        observeAnalytics(requireNotNull(selectedType)).collectAsState(initial = null)
+    } else {
+        remember { mutableStateOf<ProgramAnalytics?>(null) }
+    }
+    val analytics by analyticsState
+
+    val filteredEntries = remember(analytics, selectedRange) {
+        val cutoff = LocalDate.now().minusDays(selectedRange.daysBack.toLong())
+        analytics?.entries?.filter { !it.date.isBefore(cutoff) }.orEmpty()
+    }
+    val volumeSeries = remember(filteredEntries) {
+        filteredEntries.groupBy(AnalyticsEntry::date).map { (date, entries) -> date to entries.sumOf(AnalyticsEntry::totalVolume) }.sortedBy { it.first }
+    }
+    val testSeries = remember(filteredEntries) {
+        filteredEntries.filter { it.isTest && it.testScore != null }.map { it.date to requireNotNull(it.testScore) }
+    }
+
+    NeoScaffold(title = "Статистика") { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item {
+                if (programs.isEmpty()) {
+                    NeoPanel {
+                        Text("Сначала создай хотя бы одну программу, чтобы появилась статистика.")
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Программа", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            programs.forEach { summary ->
+                                FilterChip(
+                                    selected = selectedType == summary.exerciseType,
+                                    onClick = { selectedType = summary.exerciseType },
+                                    label = { Text(summary.exerciseType.title()) },
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            StatsRange.entries.forEach { range ->
+                                FilterChip(
+                                    selected = selectedRange == range,
+                                    onClick = { selectedRange = range },
+                                    label = { Text(range.label) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (selectedType != null) {
+                item {
+                    SummaryStatsPanel(
+                        entries = filteredEntries,
+                        exerciseType = requireNotNull(selectedType),
+                    )
+                }
+                item {
+                    ChartPanel(
+                        title = "Объем по тренировкам",
+                        subtitle = "Сумма повторов/секунд за выбранный период.",
+                        points = volumeSeries,
+                        lineColor = exerciseColor(requireNotNull(selectedType)),
+                        emptyText = "Пока нет завершенных тренировок в этом диапазоне.",
+                    )
+                }
+                item {
+                    ChartPanel(
+                        title = "Контрольные тесты",
+                        subtitle = "Результат первого контрольного подхода.",
+                        points = testSeries,
+                        lineColor = MaterialTheme.colorScheme.secondary,
+                        emptyText = "Контрольные тесты еще не выполнены.",
+                    )
+                }
+            }
+        }
+    }
+}
+
+private enum class StatsRange(
+    val label: String,
+    val daysBack: Int,
+) {
+    WEEK("Неделя", 7),
+    MONTH("Месяц", 30),
+    THREE_MONTHS("3 месяца", 90),
+    SIX_MONTHS("6 месяцев", 180),
+}
+
+@Composable
+private fun SummaryStatsPanel(
+    entries: List<AnalyticsEntry>,
+    exerciseType: ExerciseType,
+) {
+    val totalVolume = entries.sumOf(AnalyticsEntry::totalVolume)
+    val tests = entries.count(AnalyticsEntry::isTest)
+    val averageSuccess = if (entries.isEmpty()) 0 else (entries.map(AnalyticsEntry::successRate).average() * 100).roundToInt()
+    NeoPanel(accent = exerciseColor(exerciseType)) {
+        Text("Сводка", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            StatTile(label = "Сессии", value = entries.size.toString(), modifier = Modifier.weight(1f))
+            StatTile(label = "Объем", value = totalVolume.toString(), modifier = Modifier.weight(1f))
+            StatTile(label = "Тесты", value = tests.toString(), modifier = Modifier.weight(1f))
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        Text("Средняя успешность: $averageSuccess%", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun StatTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(22.dp),
+        modifier = modifier,
     ) {
         Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ChartPanel(
+    title: String,
+    subtitle: String,
+    points: List<Pair<LocalDate, Int>>,
+    lineColor: Color,
+    emptyText: String,
+) {
+    NeoPanel {
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(modifier = Modifier.height(14.dp))
+        if (points.isEmpty()) {
+            Text(emptyText, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            LineChart(points = points, lineColor = lineColor)
+        }
+    }
+}
+
+@Composable
+private fun LineChart(
+    points: List<Pair<LocalDate, Int>>,
+    lineColor: Color,
+) {
+    val maxValue = points.maxOf { it.second }.coerceAtLeast(1)
+    val minValue = points.minOf { it.second }
+    val labels = listOfNotNull(points.firstOrNull()?.first, points.getOrNull(points.lastIndex / 2)?.first, points.lastOrNull()?.first).distinct()
+    val surfaceColor = MaterialTheme.colorScheme.surface
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .height(220.dp),
         ) {
-            Text("${workout.title} • неделя ${workout.weekIndex}", fontWeight = FontWeight.SemiBold)
-            Text("${workout.scheduledDate.format(dateFormatter)} • ${workout.level.title(workout.exerciseType)}")
-            Text(if (workout.isTest) "Контрольный тест для перехода уровня." else "Пауза между подходами: ${workout.prescriptions.firstOrNull()?.restSeconds ?: 0} сек.")
-            Text(workout.transitionHint)
-            if (!workout.completed) {
-                Button(onClick = { onOpenSession(workout.id) }) { Text("Открыть") }
-            } else {
-                Text("Выполнено", color = MaterialTheme.colorScheme.secondary)
+            val leftPadding = 28.dp.toPx()
+            val bottomPadding = 26.dp.toPx()
+            val topPadding = 16.dp.toPx()
+            val width = size.width - leftPadding - 12.dp.toPx()
+            val height = size.height - topPadding - bottomPadding
+
+            repeat(4) { index ->
+                val y = topPadding + height * index / 3f
+                drawLine(
+                    color = Color.White.copy(alpha = 0.06f),
+                    start = Offset(leftPadding, y),
+                    end = Offset(leftPadding + width, y),
+                    strokeWidth = 1.dp.toPx(),
+                )
+            }
+
+            val normalized = points.mapIndexed { index, point ->
+                val x = if (points.size == 1) leftPadding + width / 2 else leftPadding + width * index / (points.lastIndex.toFloat())
+                val ratio = if (maxValue == minValue) 0.5f else (point.second - minValue).toFloat() / (maxValue - minValue).toFloat()
+                val y = topPadding + height - (height * ratio)
+                Offset(x, y)
+            }
+
+            val path = Path()
+            normalized.forEachIndexed { index, offset ->
+                if (index == 0) path.moveTo(offset.x, offset.y) else path.lineTo(offset.x, offset.y)
+            }
+
+            drawPath(
+                path = path,
+                color = lineColor,
+                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round),
+            )
+            normalized.forEach { offset ->
+                drawCircle(color = lineColor, radius = 5.dp.toPx(), center = offset)
+                drawCircle(color = surfaceColor, radius = 2.dp.toPx(), center = offset)
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            labels.forEach { label ->
+                Text(label.format(shortDateFormatter), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
             }
         }
     }
@@ -453,13 +1324,9 @@ private fun SessionScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Сессия") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Назад") } },
-            )
-        },
+    NeoScaffold(
+        title = if (currentWorkout?.isTest == true) "Контрольный тест" else "Тренировка",
+        onBack = onBack,
     ) { padding ->
         when {
             currentWorkout == null -> {
@@ -493,19 +1360,27 @@ private fun SessionScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    Text("${exerciseType.title()} • ${currentWorkout.title}", style = MaterialTheme.typography.titleLarge)
-                    Text("Подход ${currentSetIndex + 1} из ${currentWorkout.prescriptions.size}")
+                    NeoPanel(accent = exerciseColor(exerciseType)) {
+                        Text("${exerciseType.title()} • ${currentWorkout.title}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("Подход ${currentSetIndex + 1} из ${currentWorkout.prescriptions.size}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     SessionMetricCard(currentWorkout, currentSet)
-                    OutlinedTextField(
-                        value = inputValue,
-                        onValueChange = { inputs[currentSet.setIndex] = it.filter(Char::isDigit) },
-                        label = {
-                            Text(if (currentSet.targetSeconds != null) "Фактически секунд" else "Фактически повторов")
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Button(
+                    NeoPanel {
+                        OutlinedTextField(
+                            value = inputValue,
+                            onValueChange = { inputs[currentSet.setIndex] = it.filter(Char::isDigit) },
+                            label = {
+                                Text(if (currentSet.targetSeconds != null) "Фактически секунд" else "Фактически повторов")
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    PrimaryNeoButton(
+                        text = if (currentSetIndex == currentWorkout.prescriptions.lastIndex) "Завершить тренировку" else "Сохранить подход",
+                        accent = exerciseColor(exerciseType),
+                        enabled = !isSubmitting,
                         onClick = {
                             val actual = inputValue.toIntOrNull() ?: 0
                             results.removeAll { it.setIndex == currentSet.setIndex }
@@ -527,12 +1402,8 @@ private fun SessionScreen(
                                 restSecondsLeft = currentSet.restSeconds
                             }
                         },
-                        enabled = !isSubmitting,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(if (currentSetIndex == currentWorkout.prescriptions.lastIndex) "Завершить тренировку" else "Сохранить подход")
-                    }
-                    Text(currentWorkout.transitionHint, color = MaterialTheme.colorScheme.secondary)
+                    )
+                    Text(currentWorkout.transitionHint, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -541,22 +1412,30 @@ private fun SessionScreen(
 
 @Composable
 private fun SessionMetricCard(workout: WorkoutSession, set: com.vaslit.repflow.domain.SetPrescription) {
-    Card(shape = RoundedCornerShape(28.dp)) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(workout.level.title(workout.exerciseType), style = MaterialTheme.typography.titleLarge)
-            Text(
-                if (set.targetSeconds != null) "Цель: ${set.targetSeconds} сек" else "Цель: ${set.targetReps} повторов",
-                style = MaterialTheme.typography.headlineSmall,
-            )
-            Text("Отдых после подхода: ${set.restSeconds} сек")
-            Text(set.note)
-            Text(workout.techniqueTip.body)
-        }
+    NeoPanel(accent = exerciseColor(workout.exerciseType)) {
+        Text(workout.level.title(workout.exerciseType), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            set.variant.title,
+            color = MaterialTheme.colorScheme.secondary,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            if (set.targetSeconds != null) {
+                "План на подход: ${set.targetSeconds} сек"
+            } else {
+                "План на подход: ${set.targetReps} повторов"
+            },
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Black,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Можно ввести меньше, если сегодня не идет. Приложение сохранит фактический результат.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Отдых после подхода: ${set.restSeconds} сек")
+        Text(set.note)
+        Text(workout.techniqueTip.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -568,21 +1447,20 @@ private fun RestScreen(
     totalSets: Int,
     onSkip: () -> Unit,
 ) {
-    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceVariant) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text("Отдых", style = MaterialTheme.typography.headlineMedium)
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        NeoPanel(modifier = Modifier.padding(24.dp)) {
+            Text("Отдых", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Spacer(modifier = Modifier.height(12.dp))
-            Text("$secondsLeft сек", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+            Text("$secondsLeft сек", style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(12.dp))
             Text("Дальше подход $nextSet из $totalSets")
             Spacer(modifier = Modifier.height(18.dp))
-            Button(onClick = onSkip) { Text("Пропустить паузу") }
+            SecondaryNeoButton(text = "Пропустить паузу", onClick = onSkip)
         }
     }
 }
@@ -594,131 +1472,234 @@ private fun CompletionScreen(
     evaluation: EvaluationSnapshot?,
     onDone: () -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("Итог тренировки") })
-        },
-    ) { padding ->
+    NeoScaffold(title = "Итог сессии") { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(exerciseType.title(), style = MaterialTheme.typography.headlineMedium)
-            if (evaluation == null) {
-                Text("Нет данных о завершенной тренировке.")
-            } else {
-                Card(shape = RoundedCornerShape(28.dp)) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text("Рекомендация: ${evaluation.recommendation.title()}", fontWeight = FontWeight.Bold)
-                        Text("Успешность: ${(evaluation.successRate * 100).toInt()}%")
-                        Text(evaluation.summary)
-                    }
+            NeoPanel(accent = exerciseColor(exerciseType)) {
+                Text(exerciseType.title(), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+                Spacer(modifier = Modifier.height(8.dp))
+                if (evaluation == null) {
+                    Text("Нет данных о завершенной тренировке.")
+                } else {
+                    Text("Рекомендация: ${evaluation.recommendation.title()}", fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Успешность: ${(evaluation.successRate * 100).toInt()}%", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(evaluation.summary)
                 }
             }
-            Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
-                Text("Вернуться к плану")
-            }
+            PrimaryNeoButton(
+                text = "Вернуться к планам",
+                accent = exerciseColor(exerciseType),
+                onClick = onDone,
+            )
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HistoryScreen(
-    exerciseType: ExerciseType,
-    detail: ProgramDetail?,
-    onBack: () -> Unit,
+private fun NeoScaffold(
+    title: String,
+    onBack: (() -> Unit)? = null,
+    content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
-                title = { Text("История: ${exerciseType.title()}") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Назад") } },
+                title = { Text(title, fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    if (onBack != null) {
+                        TextButton(onClick = onBack) { Text("Назад") }
+                    }
+                },
             )
         },
     ) { padding ->
-        if (detail == null || detail.history.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("История появится после первой завершенной тренировки.")
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(detail.history, key = { "${it.completedAt}-${it.title}" }) { entry ->
-                    Card(shape = RoundedCornerShape(22.dp)) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Text(entry.title, fontWeight = FontWeight.SemiBold)
-                            Text("${entry.level.title(exerciseType)} • ${entry.difficulty.title()}")
-                            Text("Успешность ${(entry.successRate * 100).toInt()}%")
-                            Text(entry.summary)
-                        }
-                    }
+        content(padding)
+    }
+}
+
+@Composable
+private fun NeoPanel(
+    modifier: Modifier = Modifier,
+    accent: Color? = null,
+    content: @Composable () -> Unit,
+) {
+    val shape = RoundedCornerShape(28.dp)
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = shape,
+        modifier = modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 18.dp,
+                shape = shape,
+                spotColor = Color.Black.copy(alpha = 0.45f),
+                ambientColor = Color.Black.copy(alpha = 0.35f),
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.05f), shape),
+    ) {
+        Box(
+            modifier = Modifier
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.surface,
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f),
+                        ),
+                    ),
+                )
+                .padding(18.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                if (accent != null) {
+                    Box(
+                        modifier = Modifier
+                            .width(54.dp)
+                            .height(5.dp)
+                            .clip(CircleShape)
+                            .background(accent),
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
+                content()
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TechniqueScreen(
-    exerciseType: ExerciseType,
-    guide: List<Pair<ProgressionLevel, com.vaslit.repflow.domain.TechniqueTip>>,
-    onBack: () -> Unit,
+private fun PrimaryNeoButton(
+    text: String,
+    accent: Color,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Техника: ${exerciseType.title()}") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Назад") } },
-            )
-        },
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(guide, key = { it.first.name }) { (level, tip) ->
-                Card(shape = RoundedCornerShape(26.dp)) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(level.title(exerciseType), fontWeight = FontWeight.Bold)
-                        Text(tip.title, color = MaterialTheme.colorScheme.tertiary)
-                        Text(tip.body)
-                    }
-                }
-            }
-        }
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(24.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = accent,
+            contentColor = MaterialTheme.colorScheme.background,
+        ),
+        modifier = Modifier.defaultMinSize(minHeight = 52.dp),
+    ) {
+        Text(text, fontWeight = FontWeight.Bold)
     }
+}
+
+@Composable
+private fun SecondaryNeoButton(
+    text: String,
+    onClick: () -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        shape = RoundedCornerShape(24.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+        modifier = Modifier.defaultMinSize(minHeight = 52.dp),
+    ) {
+        Text(text)
+    }
+}
+
+@Composable
+private fun StatusBadge(status: WorkoutCalendarStatus) {
+    val color = statusColor(status)
+    Surface(
+        color = color.copy(alpha = 0.18f),
+        contentColor = color,
+        shape = RoundedCornerShape(18.dp),
+    ) {
+        Text(
+            text = when (status) {
+                WorkoutCalendarStatus.PLANNED -> "Запланировано"
+                WorkoutCalendarStatus.COMPLETED_STRONG -> "Выполнено"
+                WorkoutCalendarStatus.COMPLETED_OK -> "Сделано"
+                WorkoutCalendarStatus.MISSED -> "Пропущено"
+            },
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            style = MaterialTheme.typography.labelLarge,
+        )
+    }
+}
+
+@Composable
+private fun PlanTypeBadge(exerciseType: ExerciseType) {
+    val color = exerciseColor(exerciseType)
+    Surface(color = color.copy(alpha = 0.16f), contentColor = color, shape = RoundedCornerShape(20.dp)) {
+        Text(
+            text = if (exerciseType == ExerciseType.PULL_UP) "PU" else "PS",
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            fontWeight = FontWeight.Black,
+        )
+    }
+}
+
+private fun exerciseColor(type: ExerciseType): Color = when (type) {
+    ExerciseType.PULL_UP -> Color(0xFF68D8FF)
+    ExerciseType.PUSH_UP -> Color(0xFFFFA164)
+}
+
+private fun statusColor(status: WorkoutCalendarStatus): Color = when (status) {
+    WorkoutCalendarStatus.PLANNED -> Color(0xFF7F9BBD)
+    WorkoutCalendarStatus.COMPLETED_STRONG -> Color(0xFF62E08A)
+    WorkoutCalendarStatus.COMPLETED_OK -> Color(0xFFFFD65C)
+    WorkoutCalendarStatus.MISSED -> Color(0xFFFF6B6B)
+}
+
+private fun dominantCalendarStatus(items: List<WorkoutCalendarItem>): WorkoutCalendarStatus? = when {
+    items.isEmpty() -> null
+    items.any { it.status == WorkoutCalendarStatus.MISSED } -> WorkoutCalendarStatus.MISSED
+    items.any { it.status == WorkoutCalendarStatus.PLANNED } -> WorkoutCalendarStatus.PLANNED
+    items.any { it.status == WorkoutCalendarStatus.COMPLETED_OK } -> WorkoutCalendarStatus.COMPLETED_OK
+    else -> WorkoutCalendarStatus.COMPLETED_STRONG
+}
+
+private fun calendarItemCompactLabel(item: WorkoutCalendarItem): String {
+    val head = if (item.isTest) "Тест" else item.exerciseType.shortLabel()
+    val tail = when (item.status) {
+        WorkoutCalendarStatus.PLANNED -> "план"
+        WorkoutCalendarStatus.MISSED -> "пропуск"
+        WorkoutCalendarStatus.COMPLETED_STRONG,
+        WorkoutCalendarStatus.COMPLETED_OK -> "${((item.successRate ?: 0.0) * 100).toInt()}%"
+    }
+    return "$head $tail"
 }
 
 private val exerciseCards = listOf(ExerciseType.PULL_UP, ExerciseType.PUSH_UP)
-private val dateFormatter = DateTimeFormatter.ofPattern("dd.MM")
+private val weekDays = listOf(
+    DayOfWeek.MONDAY,
+    DayOfWeek.TUESDAY,
+    DayOfWeek.WEDNESDAY,
+    DayOfWeek.THURSDAY,
+    DayOfWeek.FRIDAY,
+    DayOfWeek.SATURDAY,
+    DayOfWeek.SUNDAY,
+)
+private val shortDateFormatter = DateTimeFormatter.ofPattern("dd.MM")
+private val fullDateFormatter = DateTimeFormatter.ofPattern("dd MMM")
+private val monthFormatter = DateTimeFormatter.ofPattern("LLLL yyyy")
 
 private fun ExerciseType.title(): String = when (this) {
     ExerciseType.PULL_UP -> "Подтягивания"
     ExerciseType.PUSH_UP -> "Отжимания"
+}
+
+private fun ExerciseType.shortLabel(): String = when (this) {
+    ExerciseType.PULL_UP -> "П"
+    ExerciseType.PUSH_UP -> "О"
 }
 
 private fun ProgressionLevel.title(exerciseType: ExerciseType): String = when (this) {
@@ -739,9 +1720,19 @@ private fun com.vaslit.repflow.domain.DifficultyLevel.title(): String = when (th
 }
 
 private fun com.vaslit.repflow.domain.ProgressionRecommendation.title(): String = when (this) {
-    com.vaslit.repflow.domain.ProgressionRecommendation.KEEP -> "оставить текущий план"
+    com.vaslit.repflow.domain.ProgressionRecommendation.KEEP -> "оставить текущий уровень"
     com.vaslit.repflow.domain.ProgressionRecommendation.DELOAD -> "снизить объем"
     com.vaslit.repflow.domain.ProgressionRecommendation.ADVANCE -> "перейти дальше"
     com.vaslit.repflow.domain.ProgressionRecommendation.CHANGE_BAND -> "ослабить резинку"
     com.vaslit.repflow.domain.ProgressionRecommendation.TRY_STRICT -> "пробовать без резинки"
+}
+
+private fun DayOfWeek.shortLabel(): String = when (this) {
+    DayOfWeek.MONDAY -> "Пн"
+    DayOfWeek.TUESDAY -> "Вт"
+    DayOfWeek.WEDNESDAY -> "Ср"
+    DayOfWeek.THURSDAY -> "Чт"
+    DayOfWeek.FRIDAY -> "Пт"
+    DayOfWeek.SATURDAY -> "Сб"
+    DayOfWeek.SUNDAY -> "Вс"
 }

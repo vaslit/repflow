@@ -24,6 +24,12 @@ enum class DifficultyLevel {
     HARD,
 }
 
+data class FinalGoal(
+    val targetLevel: ProgressionLevel,
+    val targetReps: Int,
+    val label: String,
+)
+
 data class AssessmentMetric(
     val key: String,
     val label: String,
@@ -53,6 +59,7 @@ data class WorkoutSession(
     val id: String,
     val exerciseType: ExerciseType,
     val title: String,
+    val phaseIndex: Int,
     val weekIndex: Int,
     val sessionIndex: Int,
     val scheduledDate: LocalDate,
@@ -67,6 +74,7 @@ data class WorkoutSession(
 
 data class SetPrescription(
     val setIndex: Int,
+    val variant: ExerciseVariant,
     val targetReps: Int? = null,
     val targetSeconds: Int? = null,
     val restSeconds: Int,
@@ -102,6 +110,8 @@ data class ProgramState(
     val exerciseType: ExerciseType,
     val currentLevel: ProgressionLevel,
     val currentDifficulty: DifficultyLevel,
+    val bestGoalScore: Int = 0,
+    val maintenanceMode: Boolean = false,
     val successfulSessions: Int = 0,
     val underperformSessions: Int = 0,
     val passedTests: Int = 0,
@@ -115,3 +125,17 @@ data class EvaluationSnapshot(
     val suggestedState: ProgramState,
     val summary: String,
 )
+
+fun ExerciseType.finalGoal(): FinalGoal = when (this) {
+    ExerciseType.PULL_UP -> FinalGoal(
+        targetLevel = ProgressionLevel.STRICT,
+        targetReps = 10,
+        label = "10 подтягиваний без резинки",
+    )
+
+    ExerciseType.PUSH_UP -> FinalGoal(
+        targetLevel = ProgressionLevel.CLASSIC,
+        targetReps = 30,
+        label = "30 классических отжиманий",
+    )
+}

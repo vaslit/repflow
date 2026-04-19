@@ -11,11 +11,16 @@ class RepFlowApplication : Application() {
             applicationContext,
             AppDatabase::class.java,
             "repflow.db",
-        ).fallbackToDestructiveMigration().build()
+        ).addMigrations(
+            AppDatabase.MIGRATION_1_2,
+            AppDatabase.MIGRATION_2_3,
+            AppDatabase.MIGRATION_3_4,
+        ).build()
     }
 
     val repository: AppRepository by lazy {
         AppRepository(
+            database = database,
             programDao = database.programDao(),
             workoutDao = database.workoutDao(),
             resultDao = database.resultDao(),
