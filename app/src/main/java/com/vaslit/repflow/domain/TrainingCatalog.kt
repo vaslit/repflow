@@ -1,4 +1,4 @@
-package com.vaslit.domain
+package com.vaslit.repflow.domain
 
 object TrainingCatalog {
     fun defaultAssessmentMetrics(type: ExerciseType): List<AssessmentMetric> = when (type) {

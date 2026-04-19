@@ -1,11 +1,11 @@
-package com.vaslit.data
+package com.vaslit.repflow.data
 
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
-import com.vaslit.domain.ExerciseType
+import com.vaslit.repflow.domain.ExerciseType
 import kotlinx.coroutines.flow.Flow
 
 @Dao

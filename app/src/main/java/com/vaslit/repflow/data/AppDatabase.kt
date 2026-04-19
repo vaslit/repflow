@@ -1,4 +1,4 @@
-package com.vaslit.data
+package com.vaslit.repflow.data
 
 import androidx.room.Database
 import androidx.room.Embedded
@@ -10,10 +10,10 @@ import androidx.room.Relation
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
-import com.vaslit.domain.DifficultyLevel
-import com.vaslit.domain.ExerciseType
-import com.vaslit.domain.ProgressionLevel
-import com.vaslit.domain.ProgressionRecommendation
+import com.vaslit.repflow.domain.DifficultyLevel
+import com.vaslit.repflow.domain.ExerciseType
+import com.vaslit.repflow.domain.ProgressionLevel
+import com.vaslit.repflow.domain.ProgressionRecommendation
 import java.time.Instant
 import java.time.LocalDate
 

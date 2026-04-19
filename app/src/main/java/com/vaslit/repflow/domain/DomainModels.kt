@@ -1,4 +1,4 @@
-package com.vaslit.domain
+package com.vaslit.repflow.domain
 
 import java.time.LocalDate
 

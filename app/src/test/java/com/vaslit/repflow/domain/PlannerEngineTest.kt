@@ -1,4 +1,4 @@
-package com.vaslit.domain
+package com.vaslit.repflow.domain
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test

@@ -1,9 +1,9 @@
-package com.vaslit
+package com.vaslit.repflow
 
 import android.app.Application
 import androidx.room.Room
-import com.vaslit.data.AppDatabase
-import com.vaslit.data.AppRepository
+import com.vaslit.repflow.data.AppDatabase
+import com.vaslit.repflow.data.AppRepository
 
 class RepFlowApplication : Application() {
     val database: AppDatabase by lazy {

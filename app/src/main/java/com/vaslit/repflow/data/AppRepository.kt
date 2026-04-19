@@ -1,20 +1,20 @@
-package com.vaslit.data
+package com.vaslit.repflow.data
 
-import com.vaslit.domain.AssessmentResult
-import com.vaslit.domain.DefaultPlannerEngine
-import com.vaslit.domain.DifficultyLevel
-import com.vaslit.domain.EvaluationSnapshot
-import com.vaslit.domain.ExerciseType
-import com.vaslit.domain.PlanWeek
-import com.vaslit.domain.PlannerEngine
-import com.vaslit.domain.ProgramState
-import com.vaslit.domain.ProgressionLevel
-import com.vaslit.domain.SessionResult
-import com.vaslit.domain.SetPrescription
-import com.vaslit.domain.SetResult
-import com.vaslit.domain.TechniqueTip
-import com.vaslit.domain.TrainingCatalog
-import com.vaslit.domain.WorkoutSession
+import com.vaslit.repflow.domain.AssessmentResult
+import com.vaslit.repflow.domain.DefaultPlannerEngine
+import com.vaslit.repflow.domain.DifficultyLevel
+import com.vaslit.repflow.domain.EvaluationSnapshot
+import com.vaslit.repflow.domain.ExerciseType
+import com.vaslit.repflow.domain.PlanWeek
+import com.vaslit.repflow.domain.PlannerEngine
+import com.vaslit.repflow.domain.ProgramState
+import com.vaslit.repflow.domain.ProgressionLevel
+import com.vaslit.repflow.domain.SessionResult
+import com.vaslit.repflow.domain.SetPrescription
+import com.vaslit.repflow.domain.SetResult
+import com.vaslit.repflow.domain.TechniqueTip
+import com.vaslit.repflow.domain.TrainingCatalog
+import com.vaslit.repflow.domain.WorkoutSession
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
@@ -183,7 +183,7 @@ class AppRepository(
             )
         }.map { level -> level to TrainingCatalog.techniqueTip(exerciseType, level) }
 
-    private suspend fun insertPlan(programId: Long, plan: com.vaslit.domain.ProgramPlan) {
+    private suspend fun insertPlan(programId: Long, plan: com.vaslit.repflow.domain.ProgramPlan) {
         val workouts = plan.weeks.flatMap(PlanWeek::sessions)
         workoutDao.insertWorkouts(workouts.map { it.toEntity(programId) })
         workoutDao.insertPrescriptions(

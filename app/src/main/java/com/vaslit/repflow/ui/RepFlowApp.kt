@@ -1,4 +1,4 @@
-package com.vaslit.ui
+package com.vaslit.repflow.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -52,13 +52,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.vaslit.data.ProgramDetail
-import com.vaslit.data.ProgramSummary
-import com.vaslit.domain.EvaluationSnapshot
-import com.vaslit.domain.ExerciseType
-import com.vaslit.domain.ProgressionLevel
-import com.vaslit.domain.SetResult
-import com.vaslit.domain.WorkoutSession
+import com.vaslit.repflow.data.ProgramDetail
+import com.vaslit.repflow.data.ProgramSummary
+import com.vaslit.repflow.domain.EvaluationSnapshot
+import com.vaslit.repflow.domain.ExerciseType
+import com.vaslit.repflow.domain.ProgressionLevel
+import com.vaslit.repflow.domain.SetResult
+import com.vaslit.repflow.domain.WorkoutSession
 import kotlinx.coroutines.delay
 import java.time.format.DateTimeFormatter
 
@@ -540,7 +540,7 @@ private fun SessionScreen(
 }
 
 @Composable
-private fun SessionMetricCard(workout: WorkoutSession, set: com.vaslit.domain.SetPrescription) {
+private fun SessionMetricCard(workout: WorkoutSession, set: com.vaslit.repflow.domain.SetPrescription) {
     Card(shape = RoundedCornerShape(28.dp)) {
         Column(
             modifier = Modifier
@@ -679,7 +679,7 @@ private fun HistoryScreen(
 @Composable
 private fun TechniqueScreen(
     exerciseType: ExerciseType,
-    guide: List<Pair<ProgressionLevel, com.vaslit.domain.TechniqueTip>>,
+    guide: List<Pair<ProgressionLevel, com.vaslit.repflow.domain.TechniqueTip>>,
     onBack: () -> Unit,
 ) {
     Scaffold(
@@ -732,16 +732,16 @@ private fun ProgressionLevel.title(exerciseType: ExerciseType): String = when (t
     ProgressionLevel.CLASSIC -> if (exerciseType == ExerciseType.PUSH_UP) "Классические" else "Классика"
 }
 
-private fun com.vaslit.domain.DifficultyLevel.title(): String = when (this) {
-    com.vaslit.domain.DifficultyLevel.EASY -> "легкая"
-    com.vaslit.domain.DifficultyLevel.BASE -> "базовая"
-    com.vaslit.domain.DifficultyLevel.HARD -> "усиленная"
+private fun com.vaslit.repflow.domain.DifficultyLevel.title(): String = when (this) {
+    com.vaslit.repflow.domain.DifficultyLevel.EASY -> "легкая"
+    com.vaslit.repflow.domain.DifficultyLevel.BASE -> "базовая"
+    com.vaslit.repflow.domain.DifficultyLevel.HARD -> "усиленная"
 }
 
-private fun com.vaslit.domain.ProgressionRecommendation.title(): String = when (this) {
-    com.vaslit.domain.ProgressionRecommendation.KEEP -> "оставить текущий план"
-    com.vaslit.domain.ProgressionRecommendation.DELOAD -> "снизить объем"
-    com.vaslit.domain.ProgressionRecommendation.ADVANCE -> "перейти дальше"
-    com.vaslit.domain.ProgressionRecommendation.CHANGE_BAND -> "ослабить резинку"
-    com.vaslit.domain.ProgressionRecommendation.TRY_STRICT -> "пробовать без резинки"
+private fun com.vaslit.repflow.domain.ProgressionRecommendation.title(): String = when (this) {
+    com.vaslit.repflow.domain.ProgressionRecommendation.KEEP -> "оставить текущий план"
+    com.vaslit.repflow.domain.ProgressionRecommendation.DELOAD -> "снизить объем"
+    com.vaslit.repflow.domain.ProgressionRecommendation.ADVANCE -> "перейти дальше"
+    com.vaslit.repflow.domain.ProgressionRecommendation.CHANGE_BAND -> "ослабить резинку"
+    com.vaslit.repflow.domain.ProgressionRecommendation.TRY_STRICT -> "пробовать без резинки"
 }
