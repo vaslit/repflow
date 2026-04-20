@@ -31,15 +31,36 @@ jobs:
         with:
           gradle-version: 8.7
 
+      - name: Resolve build version
+        id: version
+        shell: bash
+        run: |
+          base_name="$(grep '^appVersionName=' gradle.properties | cut -d'=' -f2)"
+          if [ -z "$base_name" ]; then
+            base_name="0.1.0"
+          fi
+          echo "name=${base_name}-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
       - name: Run unit tests
-        run: gradle testDebugUnitTest --stacktrace
+        run: >
+          gradle
+          -PappVersionName=${{ steps.version.outputs.name }}
+          -PappVersionCode=${{ steps.version.outputs.code }}
+          testDebugUnitTest
+          --stacktrace
 
       - name: Assemble debug APK
-        run: gradle assembleDebug --stacktrace
+        run: >
+          gradle
+          -PappVersionName=${{ steps.version.outputs.name }}
+          -PappVersionCode=${{ steps.version.outputs.code }}
+          assembleDebug
+          --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: repflow-debug-apk
+          name: repflow-debug-apk-${{ steps.version.outputs.name }}
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
