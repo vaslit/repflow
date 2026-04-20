@@ -18,6 +18,10 @@ permissions:
 jobs:
   bump:
     runs-on: ubuntu-latest
+    outputs:
+      version_name: ${{ steps.bump.outputs.name }}
+      version_code: ${{ steps.bump.outputs.code }}
+      tag_name: ${{ steps.bump.outputs.tag }}
 
     steps:
       - name: Checkout
@@ -100,3 +104,11 @@ jobs:
         run: |
           git push origin HEAD:main
           git push origin "${{ steps.bump.outputs.tag }}"
+
+  release:
+    needs: bump
+    uses: ./.github/workflows/release.yml
+    with:
+      version_name: ${{ needs.bump.outputs.version_name }}
+      version_code: ${{ needs.bump.outputs.version_code }}
+      tag_name: ${{ needs.bump.outputs.tag_name }}
