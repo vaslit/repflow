@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,6 +26,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -67,6 +70,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
@@ -1166,6 +1170,12 @@ private enum class StatsRange(
     SIX_MONTHS("6 месяцев", 180),
 }
 
+private enum class SessionPhase {
+    SET,
+    REST,
+    DONE,
+}
+
 @Composable
 private fun SummaryStatsPanel(
     entries: List<AnalyticsEntry>,
@@ -1304,25 +1314,60 @@ private fun SessionScreen(
     onFinished: () -> Unit,
 ) {
     var workout by remember { mutableStateOf<WorkoutSession?>(null) }
-    var currentSetIndex by rememberSaveable { mutableIntStateOf(0) }
-    val results = remember { mutableStateListOf<SetResult>() }
-    val inputs = remember { mutableStateMapOf<Int, String>() }
-    var restSecondsLeft by rememberSaveable { mutableIntStateOf(0) }
+    var activeSetIndex by rememberSaveable { mutableIntStateOf(0) }
+    var sessionPhase by rememberSaveable { mutableStateOf(SessionPhase.SET) }
+    val actualInputs = remember { mutableStateMapOf<Int, String>() }
+    val setDurationInputs = remember { mutableStateMapOf<Int, String>() }
+    val restDurationInputs = remember { mutableStateMapOf<Int, String>() }
+    var timerSeconds by rememberSaveable { mutableIntStateOf(0) }
+    var timerRunning by rememberSaveable { mutableStateOf(false) }
+    var currentActualDraft by rememberSaveable { mutableStateOf("") }
     var isSubmitting by remember { mutableStateOf(false) }
 
     LaunchedEffect(workoutId) {
         workout = viewModel.loadWorkout(workoutId)
     }
 
-    val currentWorkout = workout
-    val currentSet = currentWorkout?.prescriptions?.getOrNull(currentSetIndex)
-
-    LaunchedEffect(restSecondsLeft) {
-        if (restSecondsLeft > 0) {
-            delay(1_000)
-            restSecondsLeft -= 1
+    LaunchedEffect(workout?.id) {
+        val currentWorkout = workout ?: return@LaunchedEffect
+        activeSetIndex = 0
+        sessionPhase = SessionPhase.SET
+        timerSeconds = 0
+        timerRunning = false
+        currentActualDraft = ""
+        actualInputs.clear()
+        setDurationInputs.clear()
+        restDurationInputs.clear()
+        currentWorkout.prescriptions.forEachIndexed { index, prescription ->
+            val defaultActual = (prescription.targetReps ?: prescription.targetSeconds ?: 0)
+                .takeIf { it > 0 }
+                ?.toString()
+                .orEmpty()
+            actualInputs[prescription.setIndex] = defaultActual
+            setDurationInputs[prescription.setIndex] = ""
+            restDurationInputs[prescription.setIndex] = if (index == currentWorkout.prescriptions.lastIndex) {
+                "0"
+            } else {
+                prescription.restSeconds.toString()
+            }
         }
     }
+
+    LaunchedEffect(activeSetIndex, workout?.id) {
+        val currentWorkout = workout ?: return@LaunchedEffect
+        val set = currentWorkout.prescriptions.getOrNull(activeSetIndex) ?: return@LaunchedEffect
+        currentActualDraft = actualInputs[set.setIndex].orEmpty()
+    }
+
+    LaunchedEffect(timerRunning) {
+        while (timerRunning) {
+            delay(1_000)
+            timerSeconds += 1
+        }
+    }
+
+    val currentWorkout = workout
+    val activeSet = currentWorkout?.prescriptions?.getOrNull(activeSetIndex)
 
     NeoScaffold(
         title = if (currentWorkout?.isTest == true) "Контрольный тест" else "Тренировка",
@@ -1335,78 +1380,410 @@ private fun SessionScreen(
                 }
             }
 
-            restSecondsLeft > 0 -> {
-                RestScreen(
-                    modifier = Modifier.padding(padding),
-                    secondsLeft = restSecondsLeft,
-                    nextSet = currentSetIndex + 1,
-                    totalSets = currentWorkout.prescriptions.size,
-                    onSkip = { restSecondsLeft = 0 },
-                )
-            }
-
-            currentSet == null -> {
-                Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                    Text("Сессия завершена.")
-                }
-            }
-
             else -> {
-                val inputValue = inputs[currentSet.setIndex] ?: ""
+                val totalDurationSeconds = currentWorkout.prescriptions.sumOf { prescription ->
+                    (setDurationInputs[prescription.setIndex]?.toIntOrNull() ?: 0) +
+                        (restDurationInputs[prescription.setIndex]?.toIntOrNull() ?: 0)
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
+                        .verticalScroll(rememberScrollState())
+                        .imePadding()
+                        .navigationBarsPadding()
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     NeoPanel(accent = exerciseColor(exerciseType)) {
                         Text("${exerciseType.title()} • ${currentWorkout.title}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Подход ${currentSetIndex + 1} из ${currentWorkout.prescriptions.size}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Заполни таблицу, а ниже отмечай текущий этап и время по секундомеру.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    SessionMetricCard(currentWorkout, currentSet)
+
                     NeoPanel {
-                        OutlinedTextField(
-                            value = inputValue,
-                            onValueChange = { inputs[currentSet.setIndex] = it.filter(Char::isDigit) },
-                            label = {
-                                Text(if (currentSet.targetSeconds != null) "Фактически секунд" else "Фактически повторов")
-                            },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.fillMaxWidth(),
+                        Text("Подходы", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(10.dp))
+                        SessionTableHeader()
+                        Spacer(modifier = Modifier.height(8.dp))
+                        currentWorkout.prescriptions.forEachIndexed { index, set ->
+                            SessionEditableRow(
+                                set = set,
+                                rowIndex = index,
+                                actualValue = actualInputs[set.setIndex].orEmpty(),
+                                setDurationValue = setDurationInputs[set.setIndex].orEmpty(),
+                                restDurationValue = restDurationInputs[set.setIndex].orEmpty(),
+                                selected = activeSetIndex == index,
+                                onActualChange = { actualInputs[set.setIndex] = it.filter(Char::isDigit) },
+                                onSetDurationChange = { setDurationInputs[set.setIndex] = it.filter(Char::isDigit) },
+                                onRestDurationChange = { restDurationInputs[set.setIndex] = it.filter(Char::isDigit) },
+                            )
+                            if (index != currentWorkout.prescriptions.lastIndex) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                        }
+                    }
+
+                    NeoPanel {
+                        Text("Общее время тренировки", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            formatDurationSeconds(totalDurationSeconds),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                     }
+
+                    activeSet?.let { currentSet ->
+                        SessionCurrentStepCard(
+                            workout = currentWorkout,
+                            set = currentSet,
+                            setNumber = activeSetIndex + 1,
+                            totalSets = currentWorkout.prescriptions.size,
+                            phase = sessionPhase,
+                        )
+                    }
+
+                    NeoPanel(accent = sessionPhase.color()) {
+                        Text("Секундомер", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            formatDurationSeconds(timerSeconds),
+                            style = MaterialTheme.typography.displaySmall,
+                            fontWeight = FontWeight.Black,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            activeSet?.let {
+                                when (sessionPhase) {
+                                    SessionPhase.SET -> "Подход ${activeSetIndex + 1}"
+                                    SessionPhase.REST -> "Отдых"
+                                    SessionPhase.DONE -> "Тренировка завершена"
+                                }
+                            } ?: "Без активного этапа",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            SecondaryNeoButton(
+                                text = if (timerRunning) "Пауза" else "Старт",
+                                onClick = { timerRunning = !timerRunning },
+                                modifier = Modifier.weight(1f),
+                            )
+                            PrimaryNeoButton(
+                                text = when (sessionPhase) {
+                                    SessionPhase.SET -> "След. этап"
+                                    SessionPhase.REST -> "След. этап"
+                                    SessionPhase.DONE -> "Этапы завершены"
+                                },
+                                accent = sessionPhase.color(),
+                                enabled = activeSet != null && sessionPhase != SessionPhase.DONE,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    val set = activeSet ?: return@PrimaryNeoButton
+                                    when (sessionPhase) {
+                                        SessionPhase.SET -> {
+                                            setDurationInputs[set.setIndex] = timerSeconds.toString()
+                                            timerSeconds = 0
+                                            timerRunning = true
+                                            sessionPhase = if (activeSetIndex == currentWorkout.prescriptions.lastIndex) {
+                                                SessionPhase.DONE
+                                            } else {
+                                                SessionPhase.REST
+                                            }
+                                        }
+
+                                        SessionPhase.REST -> {
+                                            restDurationInputs[set.setIndex] = timerSeconds.toString()
+                                            timerSeconds = 0
+                                            timerRunning = true
+                                            activeSetIndex += 1
+                                            sessionPhase = SessionPhase.SET
+                                        }
+
+                                        SessionPhase.DONE -> Unit
+                                    }
+                                },
+                            )
+                        }
+                    }
+
+                    activeSet?.let { currentSet ->
+                        SessionCurrentResultEditor(
+                            set = currentSet,
+                            value = currentActualDraft,
+                            onValueChange = { currentActualDraft = it.filter(Char::isDigit) },
+                            onSave = {
+                                actualInputs[currentSet.setIndex] = currentActualDraft
+                            },
+                        )
+                    }
+
                     PrimaryNeoButton(
-                        text = if (currentSetIndex == currentWorkout.prescriptions.lastIndex) "Завершить тренировку" else "Сохранить подход",
+                        text = "Завершить тренировку",
                         accent = exerciseColor(exerciseType),
                         enabled = !isSubmitting,
                         onClick = {
-                            val actual = inputValue.toIntOrNull() ?: 0
-                            results.removeAll { it.setIndex == currentSet.setIndex }
-                            results += SetResult(
-                                setIndex = currentSet.setIndex,
-                                actualReps = currentSet.targetReps?.let { actual },
-                                actualSeconds = currentSet.targetSeconds?.let { actual },
-                                completed = actual >= (currentSet.targetReps ?: currentSet.targetSeconds ?: 0),
-                            )
-
-                            if (currentSetIndex == currentWorkout.prescriptions.lastIndex) {
-                                isSubmitting = true
-                                viewModel.completeWorkout(exerciseType, workoutId, results.toList()) {
-                                    isSubmitting = false
-                                    onFinished()
-                                }
-                            } else {
-                                currentSetIndex += 1
-                                restSecondsLeft = currentSet.restSeconds
+                            val results = currentWorkout.prescriptions.map { set ->
+                                val target = set.targetReps ?: set.targetSeconds ?: 0
+                                val actual = actualInputs[set.setIndex]?.toIntOrNull() ?: target
+                                SetResult(
+                                    setIndex = set.setIndex,
+                                    actualReps = set.targetReps?.let { actual },
+                                    actualSeconds = set.targetSeconds?.let { actual },
+                                    setDurationSeconds = setDurationInputs[set.setIndex]?.toIntOrNull() ?: 0,
+                                    restDurationSeconds = restDurationInputs[set.setIndex]?.toIntOrNull() ?: 0,
+                                    completed = actual >= target,
+                                )
+                            }
+                            isSubmitting = true
+                            viewModel.completeWorkout(exerciseType, workoutId, results) {
+                                isSubmitting = false
+                                onFinished()
                             }
                         },
                     )
                     Text(currentWorkout.transitionHint, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SessionEditableRow(
+    set: com.vaslit.repflow.domain.SetPrescription,
+    rowIndex: Int,
+    actualValue: String,
+    setDurationValue: String,
+    restDurationValue: String,
+    selected: Boolean,
+    onActualChange: (String) -> Unit,
+    onSetDurationChange: (String) -> Unit,
+    onRestDurationChange: (String) -> Unit,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    Surface(
+        color = if (selected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
+        shape = shape,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.04f),
+                shape = shape,
+            ),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TableCellText(
+                    text = (rowIndex + 1).toString(),
+                    modifier = Modifier.weight(0.55f),
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                )
+                TableCellText(
+                    text = compactVariantLabel(set.variant),
+                    modifier = Modifier.weight(1.15f),
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+                TableCellText(
+                    text = targetShortLabel(set),
+                    modifier = Modifier.weight(0.85f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                CompactNumericField(
+                    value = actualValue,
+                    onValueChange = onActualChange,
+                    modifier = Modifier.weight(0.85f),
+                )
+                CompactNumericField(
+                    value = setDurationValue,
+                    onValueChange = onSetDurationChange,
+                    modifier = Modifier.weight(0.95f),
+                )
+                CompactNumericField(
+                    value = restDurationValue,
+                    onValueChange = onRestDurationChange,
+                    modifier = Modifier.weight(0.95f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionTableHeader() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TableHeaderText("№", Modifier.weight(0.55f))
+        TableHeaderText("Упр", Modifier.weight(1.15f))
+        TableHeaderText("Цель", Modifier.weight(0.85f))
+        TableHeaderText("Факт", Modifier.weight(0.85f))
+        TableHeaderText("Подх", Modifier.weight(0.95f))
+        TableHeaderText("Отд", Modifier.weight(0.95f))
+    }
+}
+
+@Composable
+private fun TableHeaderText(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall,
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+    )
+}
+
+@Composable
+private fun TableCellText(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+    fontWeight: FontWeight = FontWeight.Medium,
+    textAlign: TextAlign = TextAlign.Start,
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        color = color,
+        fontWeight = fontWeight,
+        style = MaterialTheme.typography.labelMedium,
+        textAlign = textAlign,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun SessionCurrentStepCard(
+    workout: WorkoutSession,
+    set: com.vaslit.repflow.domain.SetPrescription,
+    setNumber: Int,
+    totalSets: Int,
+    phase: SessionPhase,
+) {
+    NeoPanel(accent = phase.color()) {
+        Text(
+            when (phase) {
+                SessionPhase.SET -> "Подход $setNumber"
+                SessionPhase.REST -> "Отдых"
+                SessionPhase.DONE -> "Тренировка завершена"
+            },
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            if (phase == SessionPhase.REST) {
+                "После подхода $setNumber из $totalSets"
+            } else {
+                "Подход $setNumber из $totalSets"
+            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(set.variant.title, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(targetLabelForSet(set), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            if (phase == SessionPhase.REST) {
+                "Рекомендованный отдых: ${set.restSeconds} сек"
+            } else {
+                workout.techniqueTip.body
+            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SessionCurrentResultEditor(
+    set: com.vaslit.repflow.domain.SetPrescription,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onSave: () -> Unit,
+) {
+    NeoPanel {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                label = {
+                    Text(if (set.targetSeconds != null) "Фактически секунд" else "Фактически повторов")
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            SecondaryNeoButton(text = "Сохранить", onClick = onSave)
+        }
+    }
+}
+
+@Composable
+private fun CompactNumericField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.background.copy(alpha = 0.55f),
+        shape = RoundedCornerShape(10.dp),
+        modifier = modifier,
+    ) {
+        BasicTextField(
+            value = value,
+            onValueChange = { onValueChange(it.filter(Char::isDigit)) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodySmall.copy(
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 9.dp),
+            decorationBox = { innerTextField ->
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (value.isEmpty()) {
+                        Text(
+                            "0",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    innerTextField()
+                }
+            },
+        )
     }
 }
 
@@ -1581,6 +1958,7 @@ private fun PrimaryNeoButton(
     accent: Color,
     onClick: () -> Unit,
     enabled: Boolean = true,
+    modifier: Modifier = Modifier,
 ) {
     Button(
         onClick = onClick,
@@ -1590,7 +1968,7 @@ private fun PrimaryNeoButton(
             containerColor = accent,
             contentColor = MaterialTheme.colorScheme.background,
         ),
-        modifier = Modifier.defaultMinSize(minHeight = 52.dp),
+        modifier = modifier.defaultMinSize(minHeight = 52.dp),
     ) {
         Text(text, fontWeight = FontWeight.Bold)
     }
@@ -1600,6 +1978,7 @@ private fun PrimaryNeoButton(
 private fun SecondaryNeoButton(
     text: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Button(
         onClick = onClick,
@@ -1608,7 +1987,7 @@ private fun SecondaryNeoButton(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.onSurface,
         ),
-        modifier = Modifier.defaultMinSize(minHeight = 52.dp),
+        modifier = modifier.defaultMinSize(minHeight = 52.dp),
     ) {
         Text(text)
     }
@@ -1676,6 +2055,48 @@ private fun calendarItemCompactLabel(item: WorkoutCalendarItem): String {
         WorkoutCalendarStatus.COMPLETED_OK -> "${((item.successRate ?: 0.0) * 100).toInt()}%"
     }
     return "$head $tail"
+}
+
+private fun SessionPhase.color(): Color = when (this) {
+    SessionPhase.SET -> Color(0xFF68D8FF)
+    SessionPhase.REST -> Color(0xFFFFD65C)
+    SessionPhase.DONE -> Color(0xFF62E08A)
+}
+
+private fun targetLabelForSet(set: com.vaslit.repflow.domain.SetPrescription): String =
+    if (set.targetSeconds != null) {
+        "Цель ${set.targetSeconds} сек"
+    } else {
+        "Цель ${set.targetReps ?: 0}"
+    }
+
+private fun targetShortLabel(set: com.vaslit.repflow.domain.SetPrescription): String =
+    if (set.targetSeconds != null) {
+        "${set.targetSeconds}s"
+    } else {
+        "${set.targetReps ?: 0}"
+    }
+
+private fun compactVariantLabel(variant: com.vaslit.repflow.domain.ExerciseVariant): String = when (variant) {
+    com.vaslit.repflow.domain.ExerciseVariant.PULL_UP_SCAPULAR_HANG -> "Вис"
+    com.vaslit.repflow.domain.ExerciseVariant.PULL_UP_NEGATIVE -> "Негатив"
+    com.vaslit.repflow.domain.ExerciseVariant.PULL_UP_BANDED -> "Резинка"
+    com.vaslit.repflow.domain.ExerciseVariant.PULL_UP_STRICT -> "Строгие"
+    com.vaslit.repflow.domain.ExerciseVariant.PUSH_UP_WALL -> "Стена"
+    com.vaslit.repflow.domain.ExerciseVariant.PUSH_UP_INCLINE -> "Опора"
+    com.vaslit.repflow.domain.ExerciseVariant.PUSH_UP_KNEE -> "Колени"
+    com.vaslit.repflow.domain.ExerciseVariant.PUSH_UP_CLASSIC -> "Классика"
+}
+
+private fun formatDurationSeconds(totalSeconds: Int): String {
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%02d:%02d".format(minutes, seconds)
+    }
 }
 
 private val exerciseCards = listOf(ExerciseType.PULL_UP, ExerciseType.PUSH_UP)

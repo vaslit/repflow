@@ -377,6 +377,8 @@ class AppRepository(
                     setIndex = it.setIndex,
                     actualReps = it.actualReps,
                     actualSeconds = it.actualSeconds,
+                    setDurationSeconds = it.setDurationSeconds,
+                    restDurationSeconds = it.restDurationSeconds,
                     completed = it.completed,
                 )
             },
@@ -656,6 +658,8 @@ private fun CompletedWorkoutWithResults.toSessionResult(): SessionResult {
                 setIndex = it.setIndex,
                 actualReps = it.actualReps,
                 actualSeconds = it.actualSeconds,
+                setDurationSeconds = it.setDurationSeconds,
+                restDurationSeconds = it.restDurationSeconds,
                 completed = it.completed,
             )
         },

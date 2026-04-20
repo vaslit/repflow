@@ -27,7 +27,7 @@ import java.time.LocalDate
         CompletedWorkoutEntity::class,
         SetResultEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 @TypeConverters(DbConverters::class)
@@ -67,6 +67,13 @@ abstract class AppDatabase : RoomDatabase() {
                     """.trimIndent(),
                 )
                 db.execSQL("ALTER TABLE set_prescriptions ADD COLUMN variantName TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE set_results ADD COLUMN setDurationSeconds INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE set_results ADD COLUMN restDurationSeconds INTEGER NOT NULL DEFAULT 0")
             }
         }
     }
@@ -224,6 +231,8 @@ data class SetResultEntity(
     val setIndex: Int,
     val actualReps: Int?,
     val actualSeconds: Int?,
+    val setDurationSeconds: Int,
+    val restDurationSeconds: Int,
     val completed: Boolean,
 )
 

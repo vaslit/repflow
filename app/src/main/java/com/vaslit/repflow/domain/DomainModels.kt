@@ -85,6 +85,8 @@ data class SetResult(
     val setIndex: Int,
     val actualReps: Int? = null,
     val actualSeconds: Int? = null,
+    val setDurationSeconds: Int = 0,
+    val restDurationSeconds: Int = 0,
     val completed: Boolean,
 )
 
