@@ -1,0 +1,102 @@
+name: Bump Release Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Which SemVer segment to bump"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure main branch
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "Run this workflow from main."
+            exit 1
+          fi
+
+      - name: Setup Git identity
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version
+        id: bump
+        shell: bash
+        run: |
+          current_name="$(grep '^appVersionName=' gradle.properties | cut -d'=' -f2)"
+          current_code="$(grep '^appVersionCode=' gradle.properties | cut -d'=' -f2)"
+
+          if [ -z "$current_name" ] || [ -z "$current_code" ]; then
+            echo "Version properties are missing in gradle.properties"
+            exit 1
+          fi
+
+          IFS='.' read -r major minor patch <<< "$current_name"
+
+          case "${{ github.event.inputs.release_type }}" in
+            patch)
+              patch=$((patch + 1))
+              ;;
+            minor)
+              minor=$((minor + 1))
+              patch=0
+              ;;
+            major)
+              major=$((major + 1))
+              minor=0
+              patch=0
+              ;;
+            *)
+              echo "Unsupported release type"
+              exit 1
+              ;;
+          esac
+
+          new_name="${major}.${minor}.${patch}"
+          new_code=$((current_code + 1))
+          new_tag="v${new_name}"
+
+          if git rev-parse "${new_tag}" >/dev/null 2>&1; then
+            echo "Tag ${new_tag} already exists"
+            exit 1
+          fi
+
+          sed -i -E "s/^appVersionName=.*/appVersionName=${new_name}/" gradle.properties
+          sed -i -E "s/^appVersionCode=.*/appVersionCode=${new_code}/" gradle.properties
+
+          echo "name=${new_name}" >> "$GITHUB_OUTPUT"
+          echo "code=${new_code}" >> "$GITHUB_OUTPUT"
+          echo "tag=${new_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and tag
+        shell: bash
+        run: |
+          git add gradle.properties
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.name }}"
+          git tag "${{ steps.bump.outputs.tag }}"
+
+      - name: Push branch and tag
+        shell: bash
+        run: |
+          git push origin HEAD:main
+          git push origin "${{ steps.bump.outputs.tag }}"
